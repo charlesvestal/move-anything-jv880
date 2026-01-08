@@ -32,23 +32,37 @@ Supported expansion cards:
 - **8MB cards**: SR-JV80-01 through SR-JV80-19 (Pop, Orchestral, Piano, Vintage Synth, World, Dance, etc.)
 - **2MB cards**: SR-JV80-97, 98, 99 Experience series
 
-## Building
+## Installation
 
+### Quick Install (pre-built)
+
+1. Download and install the module:
 ```bash
-./scripts/build.sh
+curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main/jv880-module.tar.gz | \
+  ssh ableton@move.local 'tar -xz -C /data/UserData/move-anything/modules/'
 ```
 
-This uses Docker for cross-compilation. The output will be in `dist/jv880/`.
+2. Copy your ROM files to the device:
+```bash
+scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin \
+  ableton@move.local:/data/UserData/move-anything/modules/jv880/roms/
+```
 
-## Installation
+### Build from Source
+
+Requires Docker (recommended) or ARM64 cross-compiler.
+
+```bash
+git clone https://github.com/charlesvestal/move-anything-jv880
+cd move-anything-jv880
+./scripts/build.sh
+```
 
 1. Place your ROM files in `dist/jv880/roms/`
 2. Run:
 ```bash
 ./scripts/install.sh
 ```
-
-Or manually copy `dist/jv880/` to `/data/UserData/move-anything/modules/` on your Move.
 
 ## Usage
 
