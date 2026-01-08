@@ -68,7 +68,7 @@ cd move-anything-jv880
 
 - **Left/Right buttons or Jog wheel**: Change preset
 - **Shift + Left/Right**: Jump to next/previous bank (Internal A, Internal B, Expansions)
-- **Up/Down (+/-) buttons**: Octave transpose (±4 octaves)
+- **Up/Down buttons**: Octave transpose (±4 octaves)
 - **Pads**: Play notes
 
 The display shows the current bank name, LCD output from the emulator, and patch number.
@@ -79,8 +79,8 @@ JV-880 works both as a standalone module and as a sound generator in Signal Chai
 
 ## Performance
 
-- CPU usage: ~80% on Move's CM4
-- Latency: ~46ms
+- CPU usage: ~80% on Move's CM4 (varies with expansions)
+- Latency: ~46ms (buffered emulation)
 
 ## License
 
