@@ -956,11 +956,6 @@ static void jv880_on_midi(const uint8_t *msg, int len, int source) {
 
     uint8_t status = msg[0] & 0xF0;
 
-    /* Filter capacitive touch from knobs (notes 0-9) */
-    if ((status == 0x90 || status == 0x80) && len >= 2) {
-        if (msg[1] < 10) return;
-    }
-
     /* Copy message so we can modify it */
     uint8_t modified[MIDI_MSG_MAX_LEN];
     int n = (len > MIDI_MSG_MAX_LEN) ? MIDI_MSG_MAX_LEN : len;
