@@ -3,6 +3,7 @@
  *
  * Provides UI for the Roland JV-880 emulator module.
  * Handles preset selection via MIDI program change and octave transpose.
+ * Supports multiple expansion ROMs with unified patch list.
  */
 
 import {
@@ -15,8 +16,10 @@ import { isCapacitiveTouchMessage } from '../../shared/input_filter.mjs';
 
 /* State */
 let currentPreset = 0;
+let totalPatches = 128;  /* Updated from DSP on init */
 let octaveTranspose = 0;
-let bufferFill = 0;
+let bankName = "JV-880";
+let patchName = "";
 let lcdLine0 = "";
 let lcdLine1 = "";
 
@@ -26,10 +29,6 @@ const CC_LEFT = MoveLeft;
 const CC_RIGHT = MoveRight;
 const CC_PLUS = MoveUp;
 const CC_MINUS = MoveDown;
-
-/* Note range for Move pads */
-const PAD_NOTE_MIN = MovePads[0];
-const PAD_NOTE_MAX = MovePads[MovePads.length - 1];
 
 let needsRedraw = true;
 let tickCount = 0;
@@ -43,19 +42,19 @@ const SCREEN_HEIGHT = 64;
 function drawUI() {
     clear_screen();
 
-    /* Title */
-    print(1, 1, "JV-880", 1);
+    /* Bank name (top line) */
+    print(1, 1, bankName, 1);
 
-    /* LCD lines - no border, just text with 1px margin */
+    /* LCD lines from emulator */
     print(1, 14, lcdLine0, 1);
     print(1, 26, lcdLine1, 1);
 
     /* Separator */
     fill_rect(0, 38, SCREEN_WIDTH, 1, 1);
 
-    /* Status */
+    /* Status - show patch number and total */
     const octStr = octaveTranspose >= 0 ? `+${octaveTranspose}` : `${octaveTranspose}`;
-    print(1, 42, `Oct:${octStr} Pgm:${currentPreset}`, 1);
+    print(1, 42, `Oct:${octStr} ${currentPreset + 1}/${totalPatches}`, 1);
 
     /* Help */
     print(1, 54, "Jog:Pgm +/-:Oct", 1);
@@ -65,12 +64,13 @@ function drawUI() {
 
 /* Send program change to JV-880 */
 function setPreset(index) {
-    if (index < 0) index = 127;
-    if (index > 127) index = 0;
+    /* Wrap around */
+    if (index < 0) index = totalPatches - 1;
+    if (index >= totalPatches) index = 0;
 
     currentPreset = index;
 
-    /* Send MIDI program change to DSP */
+    /* Send program change to DSP */
     host_module_set_param("program_change", String(currentPreset));
 
     needsRedraw = true;
@@ -125,21 +125,37 @@ function handleCC(cc, value) {
     return false;
 }
 
-/* === Required module UI callbacks === */
-
-globalThis.init = function() {
-    console.log("JV880 UI initializing...");
-    needsRedraw = true;
-};
-
-globalThis.tick = function() {
-    /* Update buffer fill from DSP */
-    const buf = host_module_get_param("buffer_fill");
-    if (buf) {
-        bufferFill = parseInt(buf) || 0;
+/* Update state from DSP */
+function updateFromDSP() {
+    /* Get total patches (only changes on load) */
+    const total = host_module_get_param("total_patches");
+    if (total) {
+        const n = parseInt(total);
+        if (n > 0 && n !== totalPatches) {
+            totalPatches = n;
+            needsRedraw = true;
+            console.log(`JV880: Total patches: ${totalPatches}`);
+        }
     }
 
-    /* Update LCD text from emulator */
+    /* Get current bank name */
+    const bank = host_module_get_param("bank_name");
+    if (bank && bank !== bankName) {
+        bankName = bank;
+        needsRedraw = true;
+    }
+
+    /* Get current patch index */
+    const patch = host_module_get_param("current_patch");
+    if (patch) {
+        const p = parseInt(patch);
+        if (p >= 0 && p !== currentPreset) {
+            currentPreset = p;
+            needsRedraw = true;
+        }
+    }
+
+    /* Get LCD lines from emulator */
     const line0 = host_module_get_param("lcd_line0");
     const line1 = host_module_get_param("lcd_line1");
     if (line0 !== null && line0 !== lcdLine0) {
@@ -150,6 +166,21 @@ globalThis.tick = function() {
         lcdLine1 = line1;
         needsRedraw = true;
     }
+}
+
+/* === Required module UI callbacks === */
+
+globalThis.init = function() {
+    console.log("JV880 UI initializing...");
+    needsRedraw = true;
+
+    /* Initial state from DSP */
+    updateFromDSP();
+};
+
+globalThis.tick = function() {
+    /* Update state from DSP */
+    updateFromDSP();
 
     /* Rate-limited redraw */
     tickCount++;

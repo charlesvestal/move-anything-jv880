@@ -1,7 +1,7 @@
 /*
  * JV-880 Plugin for Move Anything
  * Based on mini-jv880 emulator by giulioz (based on Nuked-SC55 by nukeykt)
- * Single-threaded approach - simpler and more reliable
+ * Multi-expansion support with unified patch list
  */
 
 #include <stdio.h>
@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include "mcu.h"
 
@@ -25,16 +26,47 @@ static char g_module_dir[512];
 static int g_initialized = 0;
 static int g_rom_loaded = 0;
 
-/* Keep ROM2 for patch data access */
+/* Keep ROM2 for internal patch data access */
 static uint8_t *g_rom2 = nullptr;
 
-/* Patch data offsets in ROM2 (from jv880_juce) */
+/* Patch data constants */
 #define PATCH_SIZE 0x16a  /* 362 bytes per patch */
-#define PATCH_OFFSET_INTERNAL_A 0x010ce0  /* Patches 0-63 */
-#define PATCH_OFFSET_INTERNAL_B 0x018ce0  /* Patches 64-127 */
-#define PATCH_OFFSET_USER       0x008ce0  /* Patches 128-191 */
-#define NVRAM_PATCH_OFFSET      0x0d70    /* Where to copy patch in NVRAM */
-#define NVRAM_MODE_OFFSET       0x11      /* 1=patch mode, 0=drum mode */
+#define PATCH_NAME_LEN 12
+#define PATCH_OFFSET_INTERNAL_A 0x010ce0
+#define PATCH_OFFSET_INTERNAL_B 0x018ce0
+#define NVRAM_PATCH_OFFSET      0x0d70
+#define NVRAM_MODE_OFFSET       0x11
+
+/* Expansion ROM support */
+#define EXPANSION_SIZE 0x800000  /* 8MB */
+#define MAX_EXPANSIONS 32
+#define MAX_PATCHES_PER_EXP 256
+
+typedef struct {
+    char filename[256];
+    char name[64];          /* Short name like "01 Pop" */
+    int patch_count;
+    uint32_t patches_offset;
+    int first_global_index; /* First patch index in unified list */
+    uint8_t *unscrambled;   /* Unscrambled ROM data (loaded on demand) */
+} ExpansionInfo;
+
+static ExpansionInfo g_expansions[MAX_EXPANSIONS];
+static int g_expansion_count = 0;
+static int g_current_expansion = -1;  /* Currently loaded expansion (-1 = none) */
+
+/* Unified patch list */
+#define MAX_TOTAL_PATCHES 4096
+typedef struct {
+    char name[PATCH_NAME_LEN + 1];
+    int expansion_index;    /* -1 for internal, 0+ for expansion */
+    int local_patch_index;  /* Index within bank/expansion */
+    uint32_t rom_offset;    /* Offset in ROM2 or expansion ROM */
+} PatchInfo;
+
+static PatchInfo g_patches[MAX_TOTAL_PATCHES];
+static int g_total_patches = 0;
+static int g_current_patch = 0;
 
 /* Background emulation thread */
 static pthread_t g_emu_thread;
@@ -117,41 +149,247 @@ static void unscramble_rom(const uint8_t *src, uint8_t *dst, int len) {
     }
 }
 
-/* Load expansion ROM (SR-JV80 card) */
-#define EXPANSION_SIZE 0x800000  /* 8MB */
-static int load_expansion_rom(const char *filename) {
-    if (!g_mcu) return 0;
+/* Extract short name from filename like "SR-JV80-01_Pop.bin" -> "01 Pop" */
+static void extract_expansion_name(const char *filename, char *name, int max_len) {
+    /* Look for pattern SR-JV80-XX_Name.bin */
+    const char *p = strstr(filename, "SR-JV80-");
+    if (p) {
+        p += 8;  /* Skip "SR-JV80-" */
+        /* Copy number and name */
+        int i = 0;
+        while (*p && *p != '.' && i < max_len - 1) {
+            if (*p == '_') {
+                name[i++] = ' ';
+            } else {
+                name[i++] = *p;
+            }
+            p++;
+        }
+        name[i] = '\0';
+    } else {
+        strncpy(name, filename, max_len - 1);
+        name[max_len - 1] = '\0';
+    }
+}
 
+/* Load and parse expansion ROM to get patch info (doesn't keep it loaded) */
+static int scan_expansion_rom(const char *filename, ExpansionInfo *info) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/roms/%s", g_module_dir, filename);
+    snprintf(path, sizeof(path), "%s/roms/expansions/%s", g_module_dir, filename);
 
     FILE *f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "JV880: Expansion ROM not found: %s\n", path);
-        return 0;
-    }
+    if (!f) return 0;
 
-    uint8_t *scrambled = (uint8_t *)malloc(EXPANSION_SIZE);
-    if (!scrambled) {
+    /* Get file size */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    /* Only support 8MB ROMs for now */
+    if (size != EXPANSION_SIZE) {
+        fprintf(stderr, "JV880: Skipping %s (size %ld, expected %d)\n", filename, size, EXPANSION_SIZE);
         fclose(f);
         return 0;
     }
 
-    size_t got = fread(scrambled, 1, EXPANSION_SIZE, f);
-    fclose(f);
-
-    if (got != EXPANSION_SIZE) {
-        fprintf(stderr, "JV880: Expansion ROM size mismatch: %zu vs %d\n", got, EXPANSION_SIZE);
+    /* Read and unscramble just enough to get patch info */
+    uint8_t *scrambled = (uint8_t *)malloc(EXPANSION_SIZE);
+    uint8_t *unscrambled = (uint8_t *)malloc(EXPANSION_SIZE);
+    if (!scrambled || !unscrambled) {
         free(scrambled);
+        free(unscrambled);
+        fclose(f);
         return 0;
     }
 
-    fprintf(stderr, "JV880: Unscrambling expansion ROM...\n");
-    unscramble_rom(scrambled, g_mcu->pcm.waverom_exp, EXPANSION_SIZE);
+    fread(scrambled, 1, EXPANSION_SIZE, f);
+    fclose(f);
+
+    unscramble_rom(scrambled, unscrambled, EXPANSION_SIZE);
     free(scrambled);
 
-    fprintf(stderr, "JV880: Loaded expansion ROM: %s\n", filename);
+    /* Parse expansion header (from jv880_juce) */
+    /* Patch count at 0x66-0x67 (big endian) */
+    int patch_count = unscrambled[0x67] | (unscrambled[0x66] << 8);
+
+    /* Patches offset at 0x8c-0x8f (big endian) */
+    uint32_t patches_offset = unscrambled[0x8f] |
+                              (unscrambled[0x8e] << 8) |
+                              (unscrambled[0x8d] << 16) |
+                              (unscrambled[0x8c] << 24);
+
+    if (patch_count <= 0 || patch_count > MAX_PATCHES_PER_EXP) {
+        fprintf(stderr, "JV880: Invalid patch count %d in %s\n", patch_count, filename);
+        free(unscrambled);
+        return 0;
+    }
+
+    /* Store info */
+    strncpy(info->filename, filename, sizeof(info->filename) - 1);
+    extract_expansion_name(filename, info->name, sizeof(info->name));
+    info->patch_count = patch_count;
+    info->patches_offset = patches_offset;
+    info->unscrambled = unscrambled;  /* Keep unscrambled data */
+
+    fprintf(stderr, "JV880: Scanned %s: %d patches at offset 0x%x\n",
+            info->name, patch_count, patches_offset);
+
     return 1;
+}
+
+/* Scan for expansion ROMs and build patch list */
+static void scan_expansions(void) {
+    char exp_dir[1024];
+    snprintf(exp_dir, sizeof(exp_dir), "%s/roms/expansions", g_module_dir);
+
+    DIR *dir = opendir(exp_dir);
+    if (!dir) {
+        fprintf(stderr, "JV880: No expansions directory\n");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && g_expansion_count < MAX_EXPANSIONS) {
+        /* Look for .bin files starting with SR-JV80 */
+        if (strstr(entry->d_name, "SR-JV80") && strstr(entry->d_name, ".bin")) {
+            if (scan_expansion_rom(entry->d_name, &g_expansions[g_expansion_count])) {
+                g_expansion_count++;
+            }
+        }
+    }
+    closedir(dir);
+
+    fprintf(stderr, "JV880: Found %d expansion ROMs\n", g_expansion_count);
+}
+
+/* Build unified patch list */
+static void build_patch_list(void) {
+    g_total_patches = 0;
+
+    /* Internal Bank A (0-63) */
+    for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &g_patches[g_total_patches];
+        uint32_t offset = PATCH_OFFSET_INTERNAL_A + (i * PATCH_SIZE);
+
+        /* Copy patch name from ROM2 */
+        memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+
+        p->expansion_index = -1;  /* Internal */
+        p->local_patch_index = i;
+        p->rom_offset = offset;
+        g_total_patches++;
+    }
+
+    /* Internal Bank B (64-127) */
+    for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &g_patches[g_total_patches];
+        uint32_t offset = PATCH_OFFSET_INTERNAL_B + (i * PATCH_SIZE);
+
+        memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+
+        p->expansion_index = -1;
+        p->local_patch_index = 64 + i;
+        p->rom_offset = offset;
+        g_total_patches++;
+    }
+
+    /* Expansion patches */
+    for (int e = 0; e < g_expansion_count; e++) {
+        ExpansionInfo *exp = &g_expansions[e];
+        exp->first_global_index = g_total_patches;
+
+        for (int i = 0; i < exp->patch_count && g_total_patches < MAX_TOTAL_PATCHES; i++) {
+            PatchInfo *p = &g_patches[g_total_patches];
+            uint32_t offset = exp->patches_offset + (i * PATCH_SIZE);
+
+            /* Copy patch name from unscrambled expansion data */
+            if (exp->unscrambled) {
+                memcpy(p->name, &exp->unscrambled[offset], PATCH_NAME_LEN);
+                p->name[PATCH_NAME_LEN] = '\0';
+            } else {
+                snprintf(p->name, sizeof(p->name), "Patch %d", i);
+            }
+
+            p->expansion_index = e;
+            p->local_patch_index = i;
+            p->rom_offset = offset;
+            g_total_patches++;
+        }
+    }
+
+    fprintf(stderr, "JV880: Total patches: %d (128 internal + %d expansion)\n",
+            g_total_patches, g_total_patches - 128);
+}
+
+/* Load expansion ROM into emulator's waverom_exp */
+static void load_expansion_to_emulator(int exp_index) {
+    if (exp_index < 0 || exp_index >= g_expansion_count) return;
+    if (exp_index == g_current_expansion) return;  /* Already loaded */
+
+    ExpansionInfo *exp = &g_expansions[exp_index];
+
+    if (exp->unscrambled) {
+        memcpy(g_mcu->pcm.waverom_exp, exp->unscrambled, EXPANSION_SIZE);
+        g_current_expansion = exp_index;
+        fprintf(stderr, "JV880: Loaded expansion %s to emulator\n", exp->name);
+    }
+}
+
+/* Load patch to NVRAM and switch expansion if needed */
+static void select_patch(int global_index) {
+    if (global_index < 0 || global_index >= g_total_patches) return;
+
+    PatchInfo *p = &g_patches[global_index];
+    g_current_patch = global_index;
+
+    /* Load expansion if needed */
+    if (p->expansion_index >= 0) {
+        load_expansion_to_emulator(p->expansion_index);
+
+        /* Copy patch from expansion to NVRAM */
+        ExpansionInfo *exp = &g_expansions[p->expansion_index];
+        if (exp->unscrambled) {
+            memcpy(&g_mcu->nvram[NVRAM_PATCH_OFFSET],
+                   &exp->unscrambled[p->rom_offset], PATCH_SIZE);
+        }
+    } else {
+        /* Internal patch - copy from ROM2 */
+        memcpy(&g_mcu->nvram[NVRAM_PATCH_OFFSET], &g_rom2[p->rom_offset], PATCH_SIZE);
+    }
+
+    /* Set patch mode */
+    g_mcu->nvram[NVRAM_MODE_OFFSET] = 1;
+
+    /* Trigger patch load */
+    uint8_t pc_msg[2] = { 0xC0, 0x00 };
+    int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != g_midi_read) {
+        memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
+        g_midi_queue_len[g_midi_write] = 2;
+        g_midi_write = next;
+    }
+
+    fprintf(stderr, "JV880: Selected patch %d: %s\n", global_index, p->name);
+}
+
+/* Get current bank name for display */
+static const char* get_current_bank_name(void) {
+    if (g_current_patch < 0 || g_current_patch >= g_total_patches) {
+        return "JV-880";
+    }
+
+    PatchInfo *p = &g_patches[g_current_patch];
+    if (p->expansion_index < 0) {
+        if (p->local_patch_index < 64) {
+            return "Internal A";
+        } else {
+            return "Internal B";
+        }
+    } else {
+        return g_expansions[p->expansion_index].name;
+    }
 }
 
 /*
@@ -175,14 +413,11 @@ static void *emu_thread_func(void *arg) {
         /* Check if we need more audio */
         int free_space = ring_free();
         if (free_space < 64) {
-            /* Ring buffer nearly full, wait a bit */
             usleep(50);
             continue;
         }
 
-        /* Generate some samples using the integrated update function */
-        /* updateSC55 generates samples into sample_buffer */
-        g_mcu->updateSC55(64);  /* Generate ~64 samples at JV880 rate */
+        g_mcu->updateSC55(64);
 
         /* Resample and copy to ring buffer */
         int avail = g_mcu->sample_write_ptr;
@@ -257,21 +492,21 @@ static int jv880_on_load(const char *module_dir, const char *json_defaults) {
     /* Initialize emulator */
     g_mcu->startSC55(rom1, rom2, waverom1, waverom2, nvram);
 
-    /* Keep ROM2 for patch data access (don't free it) */
+    /* Keep ROM2 for internal patch access */
     g_rom2 = rom2;
 
     free(rom1); free(waverom1); free(waverom2); free(nvram);
 
     g_rom_loaded = 1;
 
-    /* Set patch mode in NVRAM and load initial patch */
-    g_mcu->nvram[NVRAM_MODE_OFFSET] = 1;  /* Patch mode */
+    /* Set patch mode */
+    g_mcu->nvram[NVRAM_MODE_OFFSET] = 1;
 
-    /* Try to load expansion ROM (SR-JV80 card) */
-    /* Name it jv880_expansion.bin in the roms folder */
-    load_expansion_rom("jv880_expansion.bin");
+    /* Scan for expansion ROMs and build patch list */
+    scan_expansions();
+    build_patch_list();
 
-    /* Warmup - run emulator for a bit to initialize */
+    /* Warmup */
     fprintf(stderr, "JV880: Running warmup...\n");
     for (int i = 0; i < 100000; i++) {
         g_mcu->updateSC55(1);
@@ -286,7 +521,7 @@ static int jv880_on_load(const char *module_dir, const char *json_defaults) {
     const float ratio = (float)JV880_SAMPLE_RATE / (float)MOVE_SAMPLE_RATE;
 
     fprintf(stderr, "JV880: Pre-filling buffer...\n");
-    for (int i = 0; i < 256; i++) {  /* Minimal pre-fill for low latency */
+    for (int i = 0; i < 256; i++) {
         g_mcu->updateSC55(8);
         int avail = g_mcu->sample_write_ptr;
         for (int j = 0; j < avail; j += 2) {
@@ -326,6 +561,17 @@ static void jv880_on_unload(void) {
         g_rom2 = nullptr;
     }
 
+    /* Free expansion data */
+    for (int i = 0; i < g_expansion_count; i++) {
+        if (g_expansions[i].unscrambled) {
+            free(g_expansions[i].unscrambled);
+            g_expansions[i].unscrambled = nullptr;
+        }
+    }
+    g_expansion_count = 0;
+    g_current_expansion = -1;
+    g_total_patches = 0;
+
     g_initialized = 0;
     g_rom_loaded = 0;
 }
@@ -340,7 +586,7 @@ static void jv880_on_midi(const uint8_t *msg, int len, int source) {
 
     /* Filter capacitive touch from knobs (notes 0-9) */
     if ((status == 0x90 || status == 0x80) && len >= 2) {
-        if (msg[1] < 10) return;  /* Ignore knob touch notes */
+        if (msg[1] < 10) return;
     }
 
     /* Copy message so we can modify it */
@@ -365,36 +611,6 @@ static void jv880_on_midi(const uint8_t *msg, int len, int source) {
     }
 }
 
-/*
- * Load patch data from ROM2 to NVRAM (based on jv880_juce approach)
- * This bypasses the firmware's patch selection which doesn't work for all patches
- */
-static void load_patch_to_nvram(int program) {
-    if (!g_mcu || !g_rom2) return;
-
-    /* Determine which bank and calculate ROM offset */
-    uint32_t rom_offset;
-    if (program < 64) {
-        /* Internal Bank A */
-        rom_offset = PATCH_OFFSET_INTERNAL_A + (program * PATCH_SIZE);
-    } else if (program < 128) {
-        /* Internal Bank B */
-        rom_offset = PATCH_OFFSET_INTERNAL_B + ((program - 64) * PATCH_SIZE);
-    } else {
-        /* User patches (128-191) - not typically used via UI */
-        rom_offset = PATCH_OFFSET_USER + ((program - 128) * PATCH_SIZE);
-    }
-
-    /* Set patch mode in NVRAM */
-    g_mcu->nvram[NVRAM_MODE_OFFSET] = 1;
-
-    /* Copy patch data from ROM2 to NVRAM */
-    memcpy(&g_mcu->nvram[NVRAM_PATCH_OFFSET], &g_rom2[rom_offset], PATCH_SIZE);
-
-    fprintf(stderr, "JV880: Loaded patch %d from ROM2 offset 0x%x to NVRAM\n",
-            program, rom_offset);
-}
-
 static void jv880_set_param(const char *key, const char *val) {
     if (strcmp(key, "octave_transpose") == 0) {
         g_octave_transpose = atoi(val);
@@ -404,20 +620,8 @@ static void jv880_set_param(const char *key, const char *val) {
     } else if (strcmp(key, "program_change") == 0) {
         int program = atoi(val);
         if (program < 0) program = 0;
-        if (program > 127) program = 127;
-
-        /* Load patch data from ROM2 to NVRAM */
-        load_patch_to_nvram(program);
-
-        /* Send program change MIDI to trigger the emulator to use it */
-        uint8_t pc_msg[2] = { 0xC0, 0x00 };  /* Always send 0 - patch is already in NVRAM */
-        int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
-        if (next != g_midi_read) {
-            memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
-            g_midi_queue_len[g_midi_write] = 2;
-            g_midi_write = next;
-        }
-        fprintf(stderr, "JV880: Program change to %d\n", program);
+        if (program >= g_total_patches) program = g_total_patches - 1;
+        select_patch(program);
     }
 }
 
@@ -432,6 +636,26 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
     }
     if (strcmp(key, "lcd_line1") == 0 && g_mcu) {
         snprintf(buf, buf_len, "%s", g_mcu->lcd.GetLine(1));
+        return 1;
+    }
+    if (strcmp(key, "total_patches") == 0) {
+        snprintf(buf, buf_len, "%d", g_total_patches);
+        return 1;
+    }
+    if (strcmp(key, "current_patch") == 0) {
+        snprintf(buf, buf_len, "%d", g_current_patch);
+        return 1;
+    }
+    if (strcmp(key, "patch_name") == 0) {
+        if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
+            snprintf(buf, buf_len, "%s", g_patches[g_current_patch].name);
+        } else {
+            snprintf(buf, buf_len, "---");
+        }
+        return 1;
+    }
+    if (strcmp(key, "bank_name") == 0) {
+        snprintf(buf, buf_len, "%s", get_current_bank_name());
         return 1;
     }
     return 0;

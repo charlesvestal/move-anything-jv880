@@ -3,3 +3,8 @@ dist/
 *.o
 *.so
 .DS_Store
+
+# ROM files (not to be committed)
+*.bin
+*.BIN
+roms/
