@@ -423,8 +423,7 @@ inline void eram_pack(pcm_t *pcm, int addr, int val)
 
 void Pcm::PCM_Update(uint64_t cycles)
 {
-    // int reg_slots = (pcm.config_reg_3d & 31) + 1;
-    constexpr int reg_slots = 28;
+    int reg_slots = (pcm.config_reg_3d & 31) + 1;
     int voice_active = pcm.voice_mask & pcm.voice_mask_pending;
     while (pcm.cycles < cycles)
     {
@@ -475,8 +474,7 @@ void Pcm::PCM_Update(uint64_t cycles)
                 orval | (shifter & noise_mask), 0);
 
             // if (pcm.config_reg_3c & 0x40) // oversampling
-            // if (true) // oversampling
-            if (false) // oversampling
+            if (true) // oversampling
             {
                 pcm.ram2[30][10] = shifter;
 
@@ -1427,7 +1425,7 @@ void Pcm::PCM_Update(uint64_t cycles)
 
         pcm.nfs = 1;
 
-        constexpr int cycles = (reg_slots + 1) * 25;
+        const int cycles = (reg_slots + 1) * 25;
         pcm.cycles += (cycles * 25) / 29;
     }
 }
