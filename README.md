@@ -59,6 +59,10 @@ Or manually copy `dist/jv880/` to `/data/UserData/move-anything/modules/` on you
 
 The display shows the current bank name, LCD output from the emulator, and patch number.
 
+## Signal Chain Integration
+
+JV-880 works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using JV-880 with arpeggiators and effects.
+
 ## Performance
 
 - CPU usage: ~80% on Move's CM4
