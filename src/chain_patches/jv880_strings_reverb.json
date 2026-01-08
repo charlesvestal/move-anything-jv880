@@ -2,7 +2,7 @@
     "name": "JV-880 Strings Reverb",
     "version": 1,
     "chain": {
-        "input": "pads",
+        "input": "both",
         "midi_fx": {},
         "synth": {
             "module": "jv880",
