@@ -1,0 +1,61 @@
+# CLAUDE.md
+
+Instructions for Claude Code when working with this repository.
+
+## Project Overview
+
+JV-880 module for Move Anything - a Roland JV-880 synthesizer emulator based on mini-jv880.
+
+## Build Commands
+
+```bash
+./scripts/build.sh      # Build with Docker (recommended)
+./scripts/install.sh    # Deploy to Move
+```
+
+## Architecture
+
+```
+src/
+  dsp/
+    jv880_plugin.cpp    # Main plugin, patch management, expansion support
+    mcu.cpp/h           # H8/300 CPU emulator
+    mcu_opcodes.cpp     # CPU instruction implementation
+    pcm.cpp/h           # PCM wavetable synthesis
+    lcd.cpp/h           # LCD emulation
+  ui.js                 # JavaScript UI
+  module.json           # Module metadata
+  chain_patches/        # Signal Chain presets
+```
+
+## Key Implementation Details
+
+### Plugin API
+
+Implements Move Anything plugin_api_v1:
+- `on_load`: Loads ROMs, initializes emulator, builds patch list
+- `on_midi`: Queues MIDI for emulator thread
+- `set_param`: preset, octave_transpose, program_change, next_bank, prev_bank
+- `get_param`: preset_name, patch_name, octave_transpose, current_patch, bank_name, etc.
+- `render_block`: Pulls audio from ring buffer filled by emulator thread
+
+### Expansion ROM Support
+
+- Expansions in `roms/expansions/` with "SR-JV80" in filename
+- Auto-unscrambled on first load
+- Patch cache (`patch_cache.bin`) speeds subsequent loads
+- On-demand loading: expansion data loaded only when patch selected
+
+### Threading Model
+
+Background thread runs emulator at accelerated rate to fill audio ring buffer. Main thread pulls from buffer during render_block.
+
+## ROM Requirements
+
+- v1.0.0 ROMs required (1.0.1 causes CPU traps)
+- Files: jv880_rom1.bin, jv880_rom2.bin, jv880_waverom1.bin, jv880_waverom2.bin
+- Optional: jv880_nvram.bin
+
+## Signal Chain Integration
+
+Module declares `"chainable": true` and `"component_type": "sound_generator"` in module.json. Chain presets installed to main repo's `modules/chain/patches/` by install script.
