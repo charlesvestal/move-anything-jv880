@@ -28,8 +28,14 @@ if [ ! -f "dist/jv880/roms/jv880_rom1.bin" ]; then
 fi
 
 # Deploy to Move
-echo "Copying to Move..."
+echo "Copying module to Move..."
 scp -r dist/jv880 ableton@move.local:/data/UserData/move-anything/modules/
+
+# Install chain presets if they exist
+if [ -d "src/chain_patches" ]; then
+    echo "Installing chain presets..."
+    scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/modules/chain/patches/
+fi
 
 echo ""
 echo "=== Install Complete ==="
