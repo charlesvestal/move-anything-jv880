@@ -8,3 +8,6 @@ dist/
 *.bin
 *.BIN
 roms/
+
+# Cache files
+patch_cache.bin

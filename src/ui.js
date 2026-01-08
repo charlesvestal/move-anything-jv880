@@ -9,19 +9,22 @@
 import {
     MoveMainKnob, MoveMainButton,
     MoveLeft, MoveRight, MoveUp, MoveDown,
-    MovePads
+    MoveShift, MovePads
 } from '../../shared/constants.mjs';
 
 import { isCapacitiveTouchMessage } from '../../shared/input_filter.mjs';
 
 /* State */
 let currentPreset = 0;
-let totalPatches = 128;  /* Updated from DSP on init */
+let totalPatches = 128;
 let octaveTranspose = 0;
 let bankName = "JV-880";
-let patchName = "";
+let bankCount = 0;
 let lcdLine0 = "";
 let lcdLine1 = "";
+let loadingStatus = "Initializing...";
+let loadingComplete = false;
+let shiftHeld = false;
 
 /* Alias constants for clarity */
 const CC_JOG_WHEEL = MoveMainKnob;
@@ -29,17 +32,31 @@ const CC_LEFT = MoveLeft;
 const CC_RIGHT = MoveRight;
 const CC_PLUS = MoveUp;
 const CC_MINUS = MoveDown;
+const CC_SHIFT = MoveShift;
 
 let needsRedraw = true;
 let tickCount = 0;
-const REDRAW_INTERVAL = 6;  /* Redraw every 6 ticks (~10Hz) */
+const REDRAW_INTERVAL = 6;
 
 /* Display constants */
 const SCREEN_WIDTH = 128;
 const SCREEN_HEIGHT = 64;
 
-/* Draw the UI */
+/* Draw loading screen */
+function drawLoadingScreen() {
+    clear_screen();
+    print(1, 1, "JV-880", 1);
+    print(1, 20, "Loading...", 1);
+    print(1, 35, loadingStatus, 1);
+}
+
+/* Draw the main UI */
 function drawUI() {
+    if (!loadingComplete) {
+        drawLoadingScreen();
+        return;
+    }
+
     clear_screen();
 
     /* Bank name (top line) */
@@ -57,7 +74,7 @@ function drawUI() {
     print(1, 42, `Oct:${octStr} ${currentPreset + 1}/${totalPatches}`, 1);
 
     /* Help */
-    print(1, 54, "Jog:Pgm +/-:Oct", 1);
+    print(1, 54, "+/-:Oct Shft<>:Bank", 1);
 
     needsRedraw = false;
 }
@@ -77,6 +94,17 @@ function setPreset(index) {
     console.log(`JV880: Preset changed to ${currentPreset}`);
 }
 
+/* Jump to next/previous bank */
+function jumpBank(direction) {
+    if (direction > 0) {
+        host_module_set_param("next_bank", "1");
+    } else {
+        host_module_set_param("prev_bank", "1");
+    }
+    needsRedraw = true;
+    console.log(`JV880: Jump bank ${direction > 0 ? 'next' : 'prev'}`);
+}
+
 /* Change octave */
 function setOctave(delta) {
     octaveTranspose += delta;
@@ -90,8 +118,28 @@ function setOctave(delta) {
     console.log(`JV880: Octave transpose: ${octaveTranspose}`);
 }
 
+/* Note: Tempo and clock are now host settings, controlled via host menu */
+
 /* Handle CC messages */
 function handleCC(cc, value) {
+    /* Track shift state */
+    if (cc === CC_SHIFT) {
+        shiftHeld = value > 0;
+        return false;  /* Don't consume - let other handlers see it */
+    }
+
+    /* Shift + Left/Right = Bank jump */
+    if (shiftHeld) {
+        if (cc === CC_LEFT && value > 0) {
+            jumpBank(-1);
+            return true;
+        }
+        if (cc === CC_RIGHT && value > 0) {
+            jumpBank(1);
+            return true;
+        }
+    }
+
     /* Preset navigation with left/right buttons */
     if (cc === CC_LEFT && value > 0) {
         setPreset(currentPreset - 1);
@@ -127,14 +175,40 @@ function handleCC(cc, value) {
 
 /* Update state from DSP */
 function updateFromDSP() {
-    /* Get total patches (only changes on load) */
+    /* Check loading status */
+    const complete = host_module_get_param("loading_complete");
+    if (complete) {
+        const wasLoading = !loadingComplete;
+        loadingComplete = complete === "1";
+        if (wasLoading && loadingComplete) {
+            needsRedraw = true;
+        }
+    }
+
+    /* Get loading status message */
+    const status = host_module_get_param("loading_status");
+    if (status && status !== loadingStatus) {
+        loadingStatus = status;
+        if (!loadingComplete) needsRedraw = true;
+    }
+
+    /* Get total patches */
     const total = host_module_get_param("total_patches");
     if (total) {
         const n = parseInt(total);
         if (n > 0 && n !== totalPatches) {
             totalPatches = n;
             needsRedraw = true;
-            console.log(`JV880: Total patches: ${totalPatches}`);
+        }
+    }
+
+    /* Get bank count */
+    const banks = host_module_get_param("bank_count");
+    if (banks) {
+        const b = parseInt(banks);
+        if (b > 0 && b !== bankCount) {
+            bankCount = b;
+            needsRedraw = true;
         }
     }
 
@@ -166,6 +240,7 @@ function updateFromDSP() {
         lcdLine1 = line1;
         needsRedraw = true;
     }
+
 }
 
 /* === Required module UI callbacks === */
