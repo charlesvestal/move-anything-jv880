@@ -18,13 +18,13 @@ Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which i
 
 ## Expansion Cards
 
-Multiple SR-JV80 expansion cards are supported simultaneously. Name your expansion ROMs using the format `expansion_XX.bin` where XX is the card number (01-99), and place them in the roms folder.
+Multiple SR-JV80 expansion cards are supported simultaneously. Place expansion ROMs in the `roms/expansions/` subfolder with filenames containing "SR-JV80".
 
 Examples:
-- `expansion_01.bin` - SR-JV80-01 Pop
-- `expansion_04.bin` - SR-JV80-04 Vintage Synth
-- `expansion_10.bin` - SR-JV80-10 Bass & Drum
-- `expansion_97.bin` - SR-JV80-97 Experience (2MB)
+- `SR-JV80-01_Pop.bin`
+- `SR-JV80-04_Vintage_Synth.bin`
+- `SR-JV80-10_Bass_Drum.bin`
+- `SR-JV80-97_Experience.bin`
 
 ROMs are automatically unscrambled on first load. A patch cache is created to speed up subsequent loads.
 

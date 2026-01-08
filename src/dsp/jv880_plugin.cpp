@@ -1012,11 +1012,12 @@ static void jv880_set_param(const char *key, const char *val) {
         if (g_octave_transpose < -4) g_octave_transpose = -4;
         if (g_octave_transpose > 4) g_octave_transpose = 4;
         fprintf(stderr, "JV880: Octave transpose set to %d\n", g_octave_transpose);
-    } else if (strcmp(key, "program_change") == 0) {
+    } else if (strcmp(key, "program_change") == 0 || strcmp(key, "preset") == 0) {
         int program = atoi(val);
         if (program < 0) program = 0;
         if (program >= g_total_patches) program = g_total_patches - 1;
         select_patch(program);
+        fprintf(stderr, "JV880: Preset set to %d\n", program);
     } else if (strcmp(key, "next_bank") == 0) {
         jump_to_bank(1);
     } else if (strcmp(key, "prev_bank") == 0) {
@@ -1046,12 +1047,16 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "%d", g_current_patch);
         return 1;
     }
-    if (strcmp(key, "patch_name") == 0) {
+    if (strcmp(key, "patch_name") == 0 || strcmp(key, "preset_name") == 0) {
         if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
             snprintf(buf, buf_len, "%s", g_patches[g_current_patch].name);
         } else {
             snprintf(buf, buf_len, "---");
         }
+        return 1;
+    }
+    if (strcmp(key, "octave_transpose") == 0) {
+        snprintf(buf, buf_len, "%d", g_octave_transpose);
         return 1;
     }
     if (strcmp(key, "bank_name") == 0) {
