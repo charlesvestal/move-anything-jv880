@@ -7,7 +7,7 @@
 import * as std from 'std';
 
 import {
-    BrightGreen, DarkGrey, LightGrey, White,
+    BrightGreen, BrightRed, DarkGrey, LightGrey, White,
     MoveMainKnob, MoveMainButton,
     MoveLeft, MoveRight, MoveUp, MoveDown,
     MoveShift, MoveMenu, MoveBack,
@@ -19,7 +19,7 @@ import {
     MoveSteps, MovePads
 } from '../../shared/constants.mjs';
 
-import { isCapacitiveTouchMessage, setLED } from '../../shared/input_filter.mjs';
+import { isCapacitiveTouchMessage, setLED, setButtonLED } from '../../shared/input_filter.mjs';
 
 import {
     buildSystemMode,
@@ -35,6 +35,10 @@ import {
 const SCREEN_WIDTH = 128;
 const SCREEN_HEIGHT = 64;
 const LCD_LINE_HEIGHT = 14;
+const LED_ACTIVE = BrightGreen;
+const LED_ALERT = BrightRed;
+const LED_DIM = LightGrey;
+const LED_OFF = DarkGrey;
 
 const CC_JOG = MoveMainKnob;
 const CC_JOG_CLICK = MoveMainButton;
@@ -153,6 +157,8 @@ function setState(next) {
         favoritesView = false;
     }
     setHelp(`${next.toUpperCase()} MODE`, 2000);
+    updateStepLEDs();
+    updateButtonLEDs();
 }
 
 function setMode(next, force = false) {
@@ -160,6 +166,8 @@ function setMode(next, force = false) {
     mode = next;
     sendSysEx(buildSystemMode(next));
     updateTrackLEDs();
+    updateStepLEDs();
+    updateButtonLEDs();
     setHelp(next === 'performance' ? 'PERFORMANCE MODE' : 'PATCH MODE', 2000);
 }
 
@@ -275,6 +283,7 @@ function toggleFavorite() {
     if (favoritesIndex >= favorites.length) {
         favoritesIndex = Math.max(0, favorites.length - 1);
     }
+    updateStepLEDs();
     if (!saveFavorites()) {
         setActivity('FAV SAVE ERR');
     }
@@ -297,19 +306,85 @@ function sendCC(channel, cc, value) {
     host_module_send_midi([0xB0 | (channel & 0x0F), cc, value & 0x7F], 'host');
 }
 
+function setStepLED(index, color) {
+    const note = MoveSteps[index];
+    if (note === undefined) return;
+    setLED(note, color, true);
+}
+
+function isPageAvailable(pageId) {
+    if (pageId === 'mix' || pageId === 'part' || pageId === 'rhythm') {
+        return mode === 'performance';
+    }
+    return true;
+}
+
+function updateStepLEDs() {
+    if (uiState === 'play') {
+        setStepLED(0, mode === 'patch' ? LED_ACTIVE : LED_DIM);
+        setStepLED(1, mode === 'performance' ? LED_ACTIVE : LED_DIM);
+        setStepLED(2, rhythmFocus ? LED_ACTIVE : LED_DIM);
+        setStepLED(3, LED_DIM);
+
+        const favActive = favoritesView;
+        const favStored = isFavorite(favoriteKey());
+        setStepLED(4, favActive ? LED_ACTIVE : (favStored ? White : LED_DIM));
+
+        if (mode === 'performance') {
+            setStepLED(5, partBank ? LED_ACTIVE : LED_DIM);
+        } else {
+            setStepLED(5, LED_OFF);
+        }
+
+        setStepLED(6, octaveTranspose <= -4 ? LED_OFF : LED_DIM);
+        setStepLED(7, octaveTranspose >= 4 ? LED_OFF : LED_DIM);
+        setStepLED(8, semitoneTranspose <= -12 ? LED_OFF : LED_DIM);
+        setStepLED(9, semitoneTranspose >= 12 ? LED_OFF : LED_DIM);
+        setStepLED(10, velocityMode ? LED_ACTIVE : LED_DIM);
+        setStepLED(11, midiMonitor ? LED_ACTIVE : LED_DIM);
+        setStepLED(12, LED_DIM);
+        setStepLED(13, localAudition ? LED_ACTIVE : LED_DIM);
+        setStepLED(14, sysExRx ? LED_ACTIVE : LED_OFF);
+        setStepLED(15, uiState === 'utility' ? LED_ACTIVE : LED_DIM);
+        return;
+    }
+
+    for (let i = 0; i < PAGE_ORDER.length; i++) {
+        const pageId = PAGE_ORDER[i];
+        if (!isPageAvailable(pageId)) {
+            setStepLED(i, LED_OFF);
+            continue;
+        }
+        setStepLED(i, pageId === currentPage ? LED_ACTIVE : LED_DIM);
+    }
+}
+
+function updateButtonLEDs() {
+    setButtonLED(CC_MENU, uiState === 'play' ? LED_DIM : LED_ACTIVE, true);
+    setButtonLED(CC_BACK, LED_DIM, true);
+    setButtonLED(CC_REC, midiMonitor ? LED_ACTIVE : LED_OFF, true);
+    setButtonLED(CC_LOOP, sustainLatch ? LED_ACTIVE : LED_OFF, true);
+    setButtonLED(CC_PLAY, LED_DIM, true);
+    const muted = mode === 'patch' ? !toneEnabled[selectedTone] : !partEnabled[selectedPart];
+    setButtonLED(CC_MUTE, muted ? LED_ALERT : LED_OFF, true);
+    setButtonLED(CC_COPY, LED_DIM, true);
+    setButtonLED(CC_DELETE, LED_DIM, true);
+    setButtonLED(CC_UNDO, LED_DIM, true);
+}
+
 function updateTrackLEDs() {
     for (let i = 0; i < TRACK_NOTES.length; i++) {
         const note = TRACK_NOTES[i];
         if (mode === 'patch') {
             const enabled = !!toneEnabled[i];
             const selected = selectedTone === i;
-            const color = enabled ? (selected ? BrightGreen : LightGrey) : DarkGrey;
+            const color = enabled ? (selected ? LED_ACTIVE : LED_DIM) : LED_OFF;
             setLED(note, color, true);
         } else {
             const part = clamp(partBank * 4 + i, 0, 7);
             const enabled = !!partEnabled[part];
             const selected = selectedPart === part;
-            const color = enabled ? (selected ? BrightGreen : LightGrey) : DarkGrey;
+            const color = enabled ? (selected ? LED_ACTIVE : LED_DIM) : LED_OFF;
             setLED(note, color, true);
         }
     }
@@ -351,6 +426,7 @@ function setPreset(index) {
     currentPreset = index;
     host_module_set_param('program_change', String(currentPreset));
     setActivity(`PATCH ${currentPreset + 1}`);
+    updateStepLEDs();
     needsRedraw = true;
 }
 
@@ -435,6 +511,7 @@ function setPage(pageId) {
     if (!PAGE_ORDER.includes(pageId)) return;
     currentPage = pageId;
     selectedParamIndex = 0;
+    updateStepLEDs();
     setHelp(`PAGE ${pageId.toUpperCase()}`);
 }
 
@@ -851,9 +928,11 @@ function handleStep(stepIndex) {
         switch (stepIndex) {
             case 0:
                 setMode('patch', true);
+                updateStepLEDs();
                 return true;
             case 1:
                 setMode('performance', true);
+                updateStepLEDs();
                 return true;
             case 2:
                 if (mode !== 'performance') {
@@ -868,6 +947,7 @@ function handleStep(stepIndex) {
                     setActivity('RHYTHM OFF');
                 }
                 updateTrackLEDs();
+                updateStepLEDs();
                 return true;
             case 3:
                 setState('edit');
@@ -880,31 +960,40 @@ function handleStep(stepIndex) {
                 if (favoritesView) {
                     setHelp(favorites.length ? 'JOG=SELECT MENU=LOAD' : 'SHIFT+FAV TO ADD', 2000);
                 }
+                updateStepLEDs();
                 return true;
             case 5:
                 partBank = partBank === 0 ? 1 : 0;
                 setActivity(`BANK ${partBank + 1}`);
                 updateTrackLEDs();
+                updateStepLEDs();
                 return true;
             case 6:
                 setOctave(-1);
+                updateStepLEDs();
                 return true;
             case 7:
                 setOctave(1);
+                updateStepLEDs();
                 return true;
             case 8:
                 setTranspose(-1);
+                updateStepLEDs();
                 return true;
             case 9:
                 setTranspose(1);
+                updateStepLEDs();
                 return true;
             case 10:
                 velocityMode = !velocityMode;
                 setActivity(velocityMode ? 'VEL MODE ON' : 'VEL MODE OFF');
+                updateStepLEDs();
                 return true;
             case 11:
                 midiMonitor = !midiMonitor;
                 setActivity(midiMonitor ? 'MONITOR ON' : 'MONITOR OFF');
+                updateStepLEDs();
+                updateButtonLEDs();
                 return true;
             case 12:
                 setState('edit');
@@ -913,10 +1002,12 @@ function handleStep(stepIndex) {
             case 13:
                 localAudition = !localAudition;
                 setActivity(localAudition ? 'LOCAL ON' : 'LOCAL OFF');
+                updateStepLEDs();
                 return true;
             case 14:
                 sysExRx = !sysExRx;
                 setActivity(sysExRx ? 'SYSEX RX' : 'SYSEX THRU');
+                updateStepLEDs();
                 return true;
             case 15:
                 setState('utility');
@@ -945,6 +1036,7 @@ function handleTrack(trackIndex) {
     if (mode === 'patch') {
         selectedTone = clamp(trackIndex, 0, 3);
         updateTrackLEDs();
+        updateButtonLEDs();
         setActivity(`TONE ${selectedTone + 1}`);
         return true;
     }
@@ -953,6 +1045,7 @@ function handleTrack(trackIndex) {
     selectedPart = part;
     rhythmFocus = selectedPart === 7;
     updateTrackLEDs();
+    updateButtonLEDs();
     setActivity(`PART ${selectedPart + 1}`);
     return true;
 }
@@ -964,6 +1057,7 @@ function handleTrackShift(trackIndex) {
         toneEnabled[tone] = toneEnabled[tone] ? 0 : 1;
         sendSysEx(buildToneParam(tone, 'toneswitch', toneEnabled[tone]));
         updateTrackLEDs();
+        updateButtonLEDs();
         setActivity(`TONE ${tone + 1} ${toneEnabled[tone] ? 'ON' : 'MUTE'}`);
         return true;
     }
@@ -974,6 +1068,7 @@ function handleTrackShift(trackIndex) {
     partEnabled[part] = partEnabled[part] ? 0 : 1;
     sendSysEx(buildPartParam(part, 'internalswitch', partEnabled[part]));
     updateTrackLEDs();
+    updateButtonLEDs();
     setActivity(`PART ${part + 1} ${partEnabled[part] ? 'ON' : 'MUTE'}`);
     return true;
 }
@@ -1100,6 +1195,8 @@ function handleCC(cc, value) {
     if (cc === CC_REC && value > 0) {
         midiMonitor = !midiMonitor;
         setActivity(midiMonitor ? 'MONITOR ON' : 'MONITOR OFF');
+        updateStepLEDs();
+        updateButtonLEDs();
         return true;
     }
 
@@ -1107,6 +1204,7 @@ function handleCC(cc, value) {
         sustainLatch = !sustainLatch;
         sendSustain(sustainLatch);
         setActivity(sustainLatch ? 'SUSTAIN ON' : 'SUSTAIN OFF');
+        updateButtonLEDs();
         return true;
     }
 
@@ -1131,11 +1229,13 @@ function handleCC(cc, value) {
             toneEnabled[selectedTone] = toneEnabled[selectedTone] ? 0 : 1;
             sendSysEx(buildToneParam(selectedTone, 'toneswitch', toneEnabled[selectedTone]));
             updateTrackLEDs();
+            updateButtonLEDs();
             setActivity(toneEnabled[selectedTone] ? 'TONE ON' : 'TONE MUTE');
         } else {
             partEnabled[selectedPart] = partEnabled[selectedPart] ? 0 : 1;
             sendSysEx(buildPartParam(selectedPart, 'internalswitch', partEnabled[selectedPart]));
             updateTrackLEDs();
+            updateButtonLEDs();
             setActivity(partEnabled[selectedPart] ? 'PART ON' : 'PART MUTE');
         }
         return true;
@@ -1251,6 +1351,7 @@ function updateFromDSP() {
         const p = parseInt(patch);
         if (p >= 0 && p !== currentPreset) {
             currentPreset = p;
+            updateStepLEDs();
             needsRedraw = true;
         }
     }
@@ -1280,6 +1381,8 @@ globalThis.init = function() {
     favorites = loadFavorites();
     setMode(mode, true);
     updateTrackLEDs();
+    updateStepLEDs();
+    updateButtonLEDs();
     needsRedraw = true;
     updateFromDSP();
 };
