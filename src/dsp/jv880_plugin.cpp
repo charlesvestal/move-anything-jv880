@@ -25,6 +25,10 @@ static MCU *g_mcu = nullptr;
 static char g_module_dir[512];
 static int g_initialized = 0;
 static int g_rom_loaded = 0;
+static int g_debug_sysex = 0;
+static uint8_t g_sysex_buf[512];
+static int g_sysex_len = 0;
+static int g_sysex_capture = 0;
 
 /* Keep ROM2 for internal patch data access */
 static uint8_t *g_rom2 = nullptr;
@@ -802,6 +806,12 @@ static int jv880_on_load(const char *module_dir, const char *json_defaults) {
 
     strncpy(g_module_dir, module_dir, sizeof(g_module_dir) - 1);
     fprintf(stderr, "JV880: Loading from %s\n", module_dir);
+    char debug_path[1024];
+    snprintf(debug_path, sizeof(debug_path), "%s/debug_sysex_test", module_dir);
+    if (access(debug_path, F_OK) == 0) {
+        g_debug_sysex = 1;
+        fprintf(stderr, "JV880: SysEx debug enabled (%s)\n", debug_path);
+    }
 
     /* Create emulator instance */
     g_mcu = new MCU();
@@ -954,6 +964,43 @@ static void jv880_on_midi(const uint8_t *msg, int len, int source) {
     if (len < 1) return;
 
     uint8_t status = msg[0] & 0xF0;
+    if (g_debug_sysex) {
+        for (int i = 0; i < len; i++) {
+            uint8_t b = msg[i];
+            if (b == 0xF0) {
+                g_sysex_capture = 1;
+                g_sysex_len = 0;
+            }
+            if (g_sysex_capture) {
+                if (g_sysex_len < (int)sizeof(g_sysex_buf)) {
+                    g_sysex_buf[g_sysex_len++] = b;
+                }
+                if (b == 0xF7 || g_sysex_len >= (int)sizeof(g_sysex_buf)) {
+                    uint8_t dev = (g_sysex_len > 2) ? g_sysex_buf[2] : 0;
+                    uint8_t model = (g_sysex_len > 3) ? g_sysex_buf[3] : 0;
+                    uint8_t cmd = (g_sysex_len > 4) ? g_sysex_buf[4] : 0;
+                    int data_len = g_sysex_len - 11;
+                    if (data_len < 0) data_len = 0;
+                    fprintf(stderr,
+                            "JV880: SysEx packet len=%d dev=%02x model=%02x cmd=%02x data=%d\n",
+                            g_sysex_len, dev, model, cmd, data_len);
+                    if (g_sysex_len >= 12 && cmd == 0x12) {
+                        uint8_t a0 = g_sysex_buf[5];
+                        uint8_t a1 = g_sysex_buf[6];
+                        uint8_t a2 = g_sysex_buf[7];
+                        uint8_t a3 = g_sysex_buf[8];
+                        uint8_t d0 = g_sysex_buf[9];
+                        uint8_t mode = g_mcu ? g_mcu->nvram[NVRAM_MODE_OFFSET] : 0;
+                        fprintf(stderr,
+                                "JV880: SysEx addr=%02x %02x %02x %02x data0=%02x mode_nvram=%02x\n",
+                                a0, a1, a2, a3, d0, mode);
+                    }
+                    g_sysex_capture = 0;
+                    g_sysex_len = 0;
+                }
+            }
+        }
+    }
 
     /* Filter Move control notes (steps/track rows/knob touch) from internal MIDI. */
     if (source == MOVE_MIDI_SOURCE_INTERNAL && (status == 0x90 || status == 0x80) && len >= 2) {
