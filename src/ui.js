@@ -66,6 +66,8 @@ const PAGE_ORDER = [
     'mod', 'ctrl', 'struct', 'mix', 'part', 'rhythm', 'fx', 'util'
 ];
 
+const SYSEX_DEVICE_IDS = Array.from({ length: 16 }, (_, i) => 0x10 + i);
+
 const PLAY_MACROS = [
     { label: 'Cutoff', short: 'Cut', key: 'cutofffrequency', scope: 'tone' },
     { label: 'Reso', short: 'Res', key: 'resonance', scope: 'tone' },
@@ -277,7 +279,15 @@ function toggleFavorite() {
 
 function sendSysEx(msg) {
     if (!msg) return;
-    host_module_send_midi(msg, 'host');
+    if (msg[0] !== 0xF0 || msg.length < 6) {
+        host_module_send_midi(msg, 'host');
+        return;
+    }
+    for (const deviceId of SYSEX_DEVICE_IDS) {
+        const out = msg.slice();
+        out[2] = deviceId;
+        host_module_send_midi(out, 'host');
+    }
 }
 
 function sendCC(channel, cc, value) {
