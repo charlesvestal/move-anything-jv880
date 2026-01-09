@@ -73,6 +73,7 @@ const PAGE_ORDER = [
 ];
 
 const SYSEX_DEVICE_IDS = Array.from({ length: 16 }, (_, i) => 0x10 + i);
+const DEBUG_SYSEX_TEST_FILE = '/data/UserData/move-anything/modules/jv880/debug_sysex_test';
 
 const PLAY_MACROS = [
     { label: 'Cutoff', short: 'Cut', key: 'cutofffrequency', scope: 'tone' },
@@ -127,6 +128,8 @@ let lastActivity = { text: '', until: 0 };
 let helpLine = '';
 let helpUntilMs = 0;
 let pendingConfirm = null;
+let sysexSelfTest = { active: false, step: 0, nextAt: 0 };
+let sysexDebugEnabled = false;
 
 const paramValues = new Map();
 
@@ -137,6 +140,55 @@ const REDRAW_INTERVAL = 6;
 /* === Utility === */
 function nowMs() {
     return Date.now ? Date.now() : new Date().getTime();
+}
+
+function isSysexDebugEnabled() {
+    try {
+        return !!std.loadFile(DEBUG_SYSEX_TEST_FILE);
+    } catch (e) {
+        return false;
+    }
+}
+
+function scheduleSysexSelfTest() {
+    if (sysexSelfTest.active) return;
+    sysexSelfTest.active = true;
+    sysexSelfTest.step = 0;
+    sysexSelfTest.nextAt = nowMs() + 250;
+    console.log('JV880: SysEx self-test enabled');
+}
+
+function runSysexSelfTest() {
+    if (!sysexSelfTest.active) return;
+    const now = nowMs();
+    if (now < sysexSelfTest.nextAt) return;
+
+    if (sysexSelfTest.step === 0) {
+        console.log('JV880: SysEx test send: SYSTEM MODE -> PERFORMANCE');
+        sendSysEx(buildSystemMode('performance'));
+        sysexSelfTest.step = 1;
+        sysexSelfTest.nextAt = now + 400;
+        return;
+    }
+
+    if (sysexSelfTest.step === 1) {
+        const line0 = host_module_get_param('lcd_line0');
+        const line1 = host_module_get_param('lcd_line1');
+        console.log(`JV880: LCD after PERF: "${line0}" | "${line1}"`);
+        console.log('JV880: SysEx test send: SYSTEM MODE -> PATCH');
+        sendSysEx(buildSystemMode('patch'));
+        sysexSelfTest.step = 2;
+        sysexSelfTest.nextAt = now + 400;
+        return;
+    }
+
+    if (sysexSelfTest.step === 2) {
+        const line0 = host_module_get_param('lcd_line0');
+        const line1 = host_module_get_param('lcd_line1');
+        console.log(`JV880: LCD after PATCH: "${line0}" | "${line1}"`);
+        console.log('JV880: SysEx self-test complete');
+        sysexSelfTest.active = false;
+    }
 }
 
 function setActivity(text, durationMs = 2000) {
@@ -291,14 +343,28 @@ function toggleFavorite() {
 
 function sendSysEx(msg) {
     if (!msg) return;
+    if (sysexDebugEnabled && msg[0] === 0xF0) {
+        const head = msg.slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+        console.log(`JV880: sendSysEx len=${msg.length} head=${head}`);
+    }
     if (msg[0] !== 0xF0 || msg.length < 6) {
         host_module_send_midi(msg, 'host');
         return;
     }
+    const sendBytes = (bytes) => {
+        const chunkSize = 3;
+        if (bytes.length <= chunkSize) {
+            host_module_send_midi(bytes, 'host');
+            return;
+        }
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            host_module_send_midi(bytes.slice(i, i + chunkSize), 'host');
+        }
+    };
     for (const deviceId of SYSEX_DEVICE_IDS) {
         const out = msg.slice();
         out[2] = deviceId;
-        host_module_send_midi(out, 'host');
+        sendBytes(out);
     }
 }
 
@@ -1387,16 +1453,21 @@ function updateFromDSP() {
 globalThis.init = function() {
     console.log('JV880 UI initializing...');
     favorites = loadFavorites();
+    sysexDebugEnabled = isSysexDebugEnabled();
     setMode(mode, true);
     updateTrackLEDs();
     updateStepLEDs();
     updateButtonLEDs();
     needsRedraw = true;
     updateFromDSP();
+    if (sysexDebugEnabled) {
+        scheduleSysexSelfTest();
+    }
 };
 
 globalThis.tick = function() {
     updateFromDSP();
+    runSysexSelfTest();
 
     tickCount++;
     if (needsRedraw || tickCount >= REDRAW_INTERVAL) {
