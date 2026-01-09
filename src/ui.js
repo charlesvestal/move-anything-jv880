@@ -7,6 +7,7 @@
 import * as std from 'std';
 
 import {
+    BrightGreen, DarkGrey, LightGrey, White,
     MoveMainKnob, MoveMainButton,
     MoveLeft, MoveRight, MoveUp, MoveDown,
     MoveShift, MoveMenu, MoveBack,
@@ -18,7 +19,7 @@ import {
     MoveSteps, MovePads
 } from '../../shared/constants.mjs';
 
-import { isCapacitiveTouchMessage } from '../../shared/input_filter.mjs';
+import { isCapacitiveTouchMessage, setLED } from '../../shared/input_filter.mjs';
 
 import {
     buildSystemMode,
@@ -157,6 +158,7 @@ function setMode(next, force = false) {
     if (!force && mode === next) return;
     mode = next;
     sendSysEx(buildSystemMode(next));
+    updateTrackLEDs();
     setHelp(next === 'performance' ? 'PERFORMANCE MODE' : 'PATCH MODE', 2000);
 }
 
@@ -292,6 +294,24 @@ function sendSysEx(msg) {
 
 function sendCC(channel, cc, value) {
     host_module_send_midi([0xB0 | (channel & 0x0F), cc, value & 0x7F], 'host');
+}
+
+function updateTrackLEDs() {
+    for (let i = 0; i < TRACK_NOTES.length; i++) {
+        const note = TRACK_NOTES[i];
+        if (mode === 'patch') {
+            const enabled = !!toneEnabled[i];
+            const selected = selectedTone === i;
+            const color = enabled ? (selected ? BrightGreen : LightGrey) : DarkGrey;
+            setLED(note, color, true);
+        } else {
+            const part = clamp(partBank * 4 + i, 0, 7);
+            const enabled = !!partEnabled[part];
+            const selected = selectedPart === part;
+            const color = enabled ? (selected ? BrightGreen : LightGrey) : DarkGrey;
+            setLED(note, color, true);
+        }
+    }
 }
 
 function sendAllNotesOff() {
@@ -834,6 +854,7 @@ function handleStep(stepIndex) {
                 } else {
                     setActivity('RHYTHM OFF');
                 }
+                updateTrackLEDs();
                 return true;
             case 3:
                 setState('edit');
@@ -850,6 +871,7 @@ function handleStep(stepIndex) {
             case 5:
                 partBank = partBank === 0 ? 1 : 0;
                 setActivity(`BANK ${partBank + 1}`);
+                updateTrackLEDs();
                 return true;
             case 6:
                 setOctave(-1);
@@ -909,6 +931,7 @@ function handleStep(stepIndex) {
 function handleTrack(trackIndex) {
     if (mode === 'patch') {
         selectedTone = clamp(trackIndex, 0, 3);
+        updateTrackLEDs();
         setActivity(`TONE ${selectedTone + 1}`);
         return true;
     }
@@ -916,6 +939,7 @@ function handleTrack(trackIndex) {
     const part = clamp(partBank * 4 + trackIndex, 0, 7);
     selectedPart = part;
     rhythmFocus = selectedPart === 7;
+    updateTrackLEDs();
     setActivity(`PART ${selectedPart + 1}`);
     return true;
 }
@@ -926,6 +950,7 @@ function handleTrackShift(trackIndex) {
         selectedTone = tone;
         toneEnabled[tone] = toneEnabled[tone] ? 0 : 1;
         sendSysEx(buildToneParam(tone, 'toneswitch', toneEnabled[tone]));
+        updateTrackLEDs();
         setActivity(`TONE ${tone + 1} ${toneEnabled[tone] ? 'ON' : 'MUTE'}`);
         return true;
     }
@@ -935,6 +960,7 @@ function handleTrackShift(trackIndex) {
     rhythmFocus = selectedPart === 7;
     partEnabled[part] = partEnabled[part] ? 0 : 1;
     sendSysEx(buildPartParam(part, 'internalswitch', partEnabled[part]));
+    updateTrackLEDs();
     setActivity(`PART ${part + 1} ${partEnabled[part] ? 'ON' : 'MUTE'}`);
     return true;
 }
@@ -1091,10 +1117,12 @@ function handleCC(cc, value) {
         if (mode === 'patch') {
             toneEnabled[selectedTone] = toneEnabled[selectedTone] ? 0 : 1;
             sendSysEx(buildToneParam(selectedTone, 'toneswitch', toneEnabled[selectedTone]));
+            updateTrackLEDs();
             setActivity(toneEnabled[selectedTone] ? 'TONE ON' : 'TONE MUTE');
         } else {
             partEnabled[selectedPart] = partEnabled[selectedPart] ? 0 : 1;
             sendSysEx(buildPartParam(selectedPart, 'internalswitch', partEnabled[selectedPart]));
+            updateTrackLEDs();
             setActivity(partEnabled[selectedPart] ? 'PART ON' : 'PART MUTE');
         }
         return true;
@@ -1238,6 +1266,7 @@ globalThis.init = function() {
     console.log('JV880 UI initializing...');
     favorites = loadFavorites();
     setMode(mode, true);
+    updateTrackLEDs();
     needsRedraw = true;
     updateFromDSP();
 };
