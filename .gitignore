@@ -8,6 +8,7 @@ dist/
 *.bin
 *.BIN
 roms/
+/.worktrees
 
 # Cache files
 patch_cache.bin
