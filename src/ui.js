@@ -34,6 +34,7 @@ import {
 /* === Constants === */
 const SCREEN_WIDTH = 128;
 const SCREEN_HEIGHT = 64;
+const LCD_LINE_HEIGHT = 14;
 
 const CC_JOG = MoveMainKnob;
 const CC_JOG_CLICK = MoveMainButton;
@@ -785,8 +786,20 @@ function drawUI() {
 
     print(1, y1, line1, 1);
     print(1, y2, line2, 1);
-    print(1, y3, line3, 1);
-    print(1, y4, line4, 1);
+
+    if (uiState !== 'play') {
+        fill_rect(0, y3 - 2, SCREEN_WIDTH, LCD_LINE_HEIGHT, 1);
+        print(1, y3, line3, 0);
+        if (helpActive) {
+            print(1, y4, line4, 1);
+        } else {
+            fill_rect(0, y4 - 2, SCREEN_WIDTH, LCD_LINE_HEIGHT, 1);
+            print(1, y4, line4, 0);
+        }
+    } else {
+        print(1, y3, line3, 1);
+        print(1, y4, line4, 1);
+    }
 
     needsRedraw = false;
 }
