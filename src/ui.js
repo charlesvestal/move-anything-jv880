@@ -380,12 +380,14 @@ function updateTrackLEDs() {
             const selected = selectedTone === i;
             const color = enabled ? (selected ? LED_ACTIVE : LED_DIM) : LED_OFF;
             setLED(note, color, true);
+            setButtonLED(note, color, true);
         } else {
             const part = clamp(partBank * 4 + i, 0, 7);
             const enabled = !!partEnabled[part];
             const selected = selectedPart === part;
             const color = enabled ? (selected ? LED_ACTIVE : LED_DIM) : LED_OFF;
             setLED(note, color, true);
+            setButtonLED(note, color, true);
         }
     }
 }
@@ -1160,6 +1162,12 @@ function handleCC(cc, value) {
         }
         moveParamSelection(1);
         return true;
+    }
+
+    if (TRACK_NOTES.includes(cc) && value > 0) {
+        const trackIndex = TRACK_NOTES.indexOf(cc);
+        if (shiftHeld) return handleTrackShift(trackIndex);
+        return handleTrack(trackIndex);
     }
 
     if (cc === CC_UP && value > 0) {
