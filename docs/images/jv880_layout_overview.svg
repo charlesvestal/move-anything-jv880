@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#f7f7f7" />
+  <rect x="40" y="30" width="1120" height="100" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="60" y="70" font-family="Arial" font-size="24" fill="#000">Display (4 lines): HUD1 / HUD2 / LCD1 / LCD2</text>
+
+  <rect x="40" y="150" width="760" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="60" y="185" font-family="Arial" font-size="20" fill="#000">Encoders 1-8 (left to right)</text>
+  <text x="60" y="215" font-family="Arial" font-size="16" fill="#333">Play: Cutoff, Reso, Attack, Release, LFO Rate, LFO Depth, FX Send, Level</text>
+  <text x="60" y="240" font-family="Arial" font-size="16" fill="#333">Edit: Page parameters 1-8</text>
+
+  <rect x="820" y="150" width="160" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="840" y="185" font-family="Arial" font-size="20" fill="#000">Jog</text>
+  <text x="840" y="210" font-family="Arial" font-size="14" fill="#333">Patch / Value</text>
+
+  <rect x="1000" y="150" width="160" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="1015" y="185" font-family="Arial" font-size="20" fill="#000">D-pad</text>
+  <text x="1015" y="210" font-family="Arial" font-size="14" fill="#333">Select / Navigate</text>
+
+  <rect x="40" y="290" width="520" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="60" y="325" font-family="Arial" font-size="20" fill="#000">Transport / Utility</text>
+  <text x="60" y="350" font-family="Arial" font-size="14" fill="#333">Play, Rec, Loop, Capture, Record, Mute, Copy, Delete, Undo</text>
+
+  <rect x="580" y="290" width="580" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="600" y="325" font-family="Arial" font-size="20" fill="#000">Track Buttons (4)</text>
+  <text x="600" y="350" font-family="Arial" font-size="14" fill="#333">Patch: Tone 1-4 | Perf: Part select</text>
+  <text x="600" y="370" font-family="Arial" font-size="14" fill="#333">Shift + Track: Mute</text>
+
+  <rect x="40" y="430" width="1120" height="120" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="60" y="465" font-family="Arial" font-size="20" fill="#000">Step Buttons (16)</text>
+  <text x="60" y="490" font-family="Arial" font-size="14" fill="#333">Play: shortcuts | Edit: page tabs</text>
+
+  <rect x="40" y="570" width="1120" height="200" fill="#ffffff" stroke="#333" stroke-width="2" />
+  <text x="60" y="610" font-family="Arial" font-size="20" fill="#000">Pads (8x4)</text>
+  <text x="60" y="635" font-family="Arial" font-size="14" fill="#333">Always playable. Never repurposed for editing.</text>
+
+  <text x="40" y="790" font-family="Arial" font-size="12" fill="#555">Logical layout map (not physical scale). See manual for full mappings.</text>
+</svg>
