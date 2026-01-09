@@ -129,7 +129,7 @@ static pthread_mutex_t g_ring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* MIDI queue */
 #define MIDI_QUEUE_SIZE 256
-#define MIDI_MSG_MAX_LEN 32
+#define MIDI_MSG_MAX_LEN 256
 static uint8_t g_midi_queue[MIDI_QUEUE_SIZE][MIDI_MSG_MAX_LEN];
 static int g_midi_queue_len[MIDI_QUEUE_SIZE];
 static volatile int g_midi_write = 0;
