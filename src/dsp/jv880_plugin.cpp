@@ -950,12 +950,19 @@ static void jv880_on_unload(void) {
 }
 
 static void jv880_on_midi(const uint8_t *msg, int len, int source) {
-    (void)source;
-
     if (!g_initialized || !g_thread_running) return;
     if (len < 1) return;
 
     uint8_t status = msg[0] & 0xF0;
+
+    /* Filter Move control notes (steps/track rows/knob touch) from internal MIDI. */
+    if (source == MOVE_MIDI_SOURCE_INTERNAL && (status == 0x90 || status == 0x80) && len >= 2) {
+        const uint8_t note = msg[1];
+        const bool is_step = (note >= 16 && note <= 31);
+        const bool is_track_row = (note >= 40 && note <= 43);
+        const bool is_knob_touch = (note < 10);
+        if (is_step || is_track_row || is_knob_touch) return;
+    }
 
     /* Copy message so we can modify it */
     uint8_t modified[MIDI_MSG_MAX_LEN];
