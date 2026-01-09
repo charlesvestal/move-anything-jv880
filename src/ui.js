@@ -151,8 +151,8 @@ function setState(next) {
     setHelp(`${next.toUpperCase()} MODE`, 2000);
 }
 
-function setMode(next) {
-    if (mode === next) return;
+function setMode(next, force = false) {
+    if (!force && mode === next) return;
     mode = next;
     sendSysEx(buildSystemMode(next));
     setHelp(next === 'performance' ? 'PERFORMANCE MODE' : 'PATCH MODE', 2000);
@@ -807,10 +807,10 @@ function handleStep(stepIndex) {
         }
         switch (stepIndex) {
             case 0:
-                setMode('patch');
+                setMode('patch', true);
                 return true;
             case 1:
-                setMode('performance');
+                setMode('performance', true);
                 return true;
             case 2:
                 if (mode !== 'performance') {
@@ -1227,6 +1227,7 @@ function updateFromDSP() {
 globalThis.init = function() {
     console.log('JV880 UI initializing...');
     favorites = loadFavorites();
+    setMode(mode, true);
     needsRedraw = true;
     updateFromDSP();
 };
