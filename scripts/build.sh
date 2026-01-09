@@ -66,6 +66,7 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
 echo "Packaging..."
 cp src/module.json dist/jv880/
 cp src/ui.js dist/jv880/
+cp src/jv880_sysex.mjs dist/jv880/
 cp build/dsp.so dist/jv880/
 
 echo ""
