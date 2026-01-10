@@ -14,6 +14,19 @@ This module turns Move into a JV-880 front panel and editor. It does not do sequ
 
 3) Select the **JV-880** module.
 
+## Surface Map (ASCII)
+
+Top row:
+  [D-PAD] [JOG] [MENU] [BACK] [SHIFT]
+
+Middle:
+  Encoders 1..8 (touch + turn)
+  Track buttons 1..4
+
+Bottom:
+  Steps 1..16
+  Pads 8x4 (always playable)
+
 ## UI States
 
 - **Play** (default): performance control and patch/part selection.
@@ -23,7 +36,7 @@ This module turns Move into a JV-880 front panel and editor. It does not do sequ
 Navigation:
 - **MENU** enters Edit (or loads a favorite if Favorites view is active).
 - **SHIFT + MENU** enters Utility.
-- **BACK** exits to Play.
+- **BACK** exits one level; hold BACK returns to Play.
 
 ## Display (4 Lines)
 
@@ -156,8 +169,6 @@ Cutoff changes are subtle:
 Step buttons make sound:
 - They should not. If you hear notes, update to the latest module build.
 
-## Layout Images
+## Notes
 
-![JV-880 Move Layout Overview](images/jv880_layout_overview.svg)
-
-![JV-880 Step Button Map](images/jv880_step_map.svg)
+- STRUCT is a placeholder in the UI; the JV-880 does not implement later JV/XV structure types.
