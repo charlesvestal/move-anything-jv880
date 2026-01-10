@@ -72,8 +72,9 @@ const PAGE_ORDER = [
     'mod', 'ctrl', 'struct', 'mix', 'part', 'rhythm', 'fx', 'util'
 ];
 
-const SYSEX_DEVICE_IDS = Array.from({ length: 16 }, (_, i) => 0x10 + i);
+const SYSEX_DEVICE_IDS = [0x10];
 const DEBUG_SYSEX_TEST_FILE = '/data/UserData/move-anything/modules/jv880/debug_sysex_test';
+const SYSEX_THROTTLE_MS = 30;
 
 const PLAY_MACROS = [
     { label: 'Cutoff', short: 'Cut', key: 'cutofffrequency', scope: 'tone' },
@@ -132,6 +133,7 @@ let sysexSelfTest = { active: false, step: 0, nextAt: 0 };
 let sysexDebugEnabled = false;
 
 const paramValues = new Map();
+const pendingSysex = new Map();
 
 let needsRedraw = true;
 let tickCount = 0;
@@ -368,6 +370,38 @@ function sendSysEx(msg) {
     }
 }
 
+function queueSysEx(key, msg) {
+    if (!msg) return;
+    const now = nowMs();
+    let entry = pendingSysex.get(key);
+    if (!entry) {
+        entry = { msg, lastSent: 0, dueAt: 0 };
+        pendingSysex.set(key, entry);
+    } else {
+        entry.msg = msg;
+    }
+
+    if (now - entry.lastSent >= SYSEX_THROTTLE_MS) {
+        sendSysEx(entry.msg);
+        entry.lastSent = now;
+        entry.dueAt = 0;
+    } else {
+        entry.dueAt = entry.lastSent + SYSEX_THROTTLE_MS;
+    }
+}
+
+function flushPendingSysEx() {
+    if (pendingSysex.size === 0) return;
+    const now = nowMs();
+    for (const entry of pendingSysex.values()) {
+        if (entry.dueAt && now >= entry.dueAt) {
+            sendSysEx(entry.msg);
+            entry.lastSent = now;
+            entry.dueAt = 0;
+        }
+    }
+}
+
 function sendCC(channel, cc, value) {
     host_module_send_midi([0xB0 | (channel & 0x0F), cc, value & 0x7F], 'host');
 }
@@ -548,20 +582,21 @@ function sendParamValue(param, value) {
         return;
     }
 
+    const target = resolveParamTarget(param);
+    const queueKey = getParamStoreKey(param, target);
     if (param.scope === 'patchCommon') {
-        sendSysEx(buildPatchCommonParam(param.key, v));
+        queueSysEx(queueKey, buildPatchCommonParam(param.key, v));
     } else if (param.scope === 'tone') {
-        sendSysEx(buildToneParam(selectedTone, param.key, v));
+        queueSysEx(queueKey, buildToneParam(selectedTone, param.key, v));
     } else if (param.scope === 'performanceCommon') {
-        sendSysEx(buildPerformanceCommonParam(param.key, v));
+        queueSysEx(queueKey, buildPerformanceCommonParam(param.key, v));
     } else if (param.scope === 'part') {
-        const part = resolveParamTarget(param);
-        sendSysEx(buildPartParam(part, param.key, v));
+        queueSysEx(queueKey, buildPartParam(target, param.key, v));
     } else if (param.scope === 'drum') {
-        sendSysEx(buildDrumParam(resolveParamTarget(param), param.key, v));
+        queueSysEx(queueKey, buildDrumParam(target, param.key, v));
     }
 
-    setParamValue(param, resolveParamTarget(param), v);
+    setParamValue(param, target, v);
 }
 
 function applyParamDelta(param, delta, fine, encoderIndex) {
@@ -1468,6 +1503,7 @@ globalThis.init = function() {
 globalThis.tick = function() {
     updateFromDSP();
     runSysexSelfTest();
+    flushPendingSysEx();
 
     tickCount++;
     if (needsRedraw || tickCount >= REDRAW_INTERVAL) {
