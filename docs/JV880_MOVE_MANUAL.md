@@ -118,7 +118,7 @@ Edit State tabs:
 8. OUT/FX
 9. MOD
 10. CTRL
-11. STRUCT
+11. STRUCT (Not used)
 12. MIX
 13. PART
 14. RHYTHM
