@@ -4,15 +4,9 @@ This module turns Move into a JV-880 front panel and editor. It does not do sequ
 
 ## Quick Start
 
-1) Install ROMs on Move (required for sound):
-- `/data/UserData/move-anything/modules/jv880/roms/`
-- `jv880_rom1.bin`, `jv880_rom2.bin`, `jv880_waverom1.bin`, `jv880_waverom2.bin`
-- Optional: `jv880_nvram.bin`
-
-2) Launch Move Anything
-- Hold **Shift + touch Volume + Knob 8**.
-
-3) Select the **JV-880** module.
+1) Launch Move Anything.
+2) Select the **JV-880** module.
+3) Play pads and turn encoders to shape the sound.
 
 ## Surface Map (ASCII)
 
@@ -124,7 +118,7 @@ Edit State tabs:
 8. OUT/FX
 9. MOD
 10. CTRL
-11. STRUCT (placeholder; JV-880 has no true structures)
+11. STRUCT
 12. MIX
 13. PART
 14. RHYTHM
@@ -154,21 +148,3 @@ Edit State tabs:
   - BACK exits.
 
 Favorites save to `favorites.json` in the module folder.
-
-## Troubleshooting
-
-No sound:
-- Confirm ROMs exist at `/data/UserData/move-anything/modules/jv880/roms/`.
-- Ensure Move Anything is running and JV-880 is selected.
-- Try a different patch; some may be quiet or filtered.
-
-Cutoff changes are subtle:
-- Increase Resonance (encoder 2) and sweep Cutoff (encoder 1).
-- Use a brighter patch or increase Level (encoder 8).
-
-Step buttons make sound:
-- They should not. If you hear notes, update to the latest module build.
-
-## Notes
-
-- STRUCT is a placeholder in the UI; the JV-880 does not implement later JV/XV structure types.
