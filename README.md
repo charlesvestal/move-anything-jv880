@@ -73,6 +73,10 @@ cd move-anything-jv880
 
 The display shows the current bank name, LCD output from the emulator, and patch number.
 
+## Editor Manual
+
+See `docs/JV880_MOVE_MANUAL.md` for the full control map and editor workflow.
+
 ## Signal Chain Integration
 
 JV-880 works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using JV-880 with arpeggiators and effects.
