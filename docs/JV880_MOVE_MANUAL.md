@@ -96,40 +96,40 @@ Performance Mode:
 ## Step Buttons (16)
 
 Play State shortcuts:
-1 Patch Mode
-2 Performance Mode
-3 Rhythm Focus
-4 FX page
-5 Favorites view (toggle)
-6 Part Bank toggle
-7 Octave −
-8 Octave +
-9 Transpose −
-10 Transpose +
-11 Velocity Mode (HUD only)
-12 MIDI Monitor toggle (HUD only)
-13 Output/FX page
-14 Local Control toggle (HUD only)
-15 SysEx RX/Thru toggle (HUD only)
-16 Utility shortcut
+1. Patch Mode
+2. Performance Mode
+3. Rhythm Focus
+4. FX page
+5. Favorites view (toggle)
+6. Part Bank toggle
+7. Octave -
+8. Octave +
+9. Transpose -
+10. Transpose +
+11. Velocity Mode (HUD only)
+12. MIDI Monitor toggle (HUD only)
+13. Output/FX page
+14. Local Control toggle (HUD only)
+15. SysEx RX/Thru toggle (HUD only)
+16. Utility shortcut
 
 Edit State tabs:
-1 HOME
-2 COMMON
-3 TONE/WG
-4 PITCH
-5 TVF
-6 TVA
-7 LFO (SHIFT + this tab toggles LFO1/2)
-8 OUT/FX
-9 MOD
-10 CTRL
-11 STRUCT (placeholder; JV-880 has no true structures)
-12 MIX
-13 PART
-14 RHYTHM
-15 FX
-16 UTIL
+1. HOME
+2. COMMON
+3. TONE/WG
+4. PITCH
+5. TVF
+6. TVA
+7. LFO (SHIFT + this tab toggles LFO1/2)
+8. OUT/FX
+9. MOD
+10. CTRL
+11. STRUCT (placeholder; JV-880 has no true structures)
+12. MIX
+13. PART
+14. RHYTHM
+15. FX
+16. UTIL
 
 ## Transport / Utility Buttons
 
