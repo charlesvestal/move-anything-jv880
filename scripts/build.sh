@@ -62,12 +62,13 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
     -Isrc/dsp \
     -lm -lpthread
 
-# Copy files to dist
+# Copy files to dist (use cat to avoid ExtFS deallocation issues with Docker)
 echo "Packaging..."
-cp src/module.json dist/jv880/
-cp src/ui.js dist/jv880/
-cp src/jv880_sysex.mjs dist/jv880/
-cp build/dsp.so dist/jv880/
+cat src/module.json > dist/jv880/module.json
+cat src/ui.js > dist/jv880/ui.js
+cat src/jv880_sysex.mjs > dist/jv880/jv880_sysex.mjs
+cat build/dsp.so > dist/jv880/dsp.so
+chmod +x dist/jv880/dsp.so
 
 echo ""
 echo "=== Build Complete ==="
