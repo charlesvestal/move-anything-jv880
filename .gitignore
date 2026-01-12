@@ -12,3 +12,5 @@ roms/
 
 # Cache files
 patch_cache.bin
+.serena/cache/cpp/document_symbols.pkl
+.serena/cache/cpp/raw_document_symbols.pkl
