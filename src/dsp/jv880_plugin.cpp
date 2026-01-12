@@ -76,6 +76,13 @@ static PatchInfo g_patches[MAX_TOTAL_PATCHES];
 static int g_total_patches = 0;
 static int g_current_patch = 0;
 
+/* Performance mode support */
+static int g_performance_mode = 0;  /* 0 = patch mode, 1 = performance mode */
+static int g_current_performance = 0;  /* 0-7 for user performances */
+static int g_current_part = 0;  /* 0-7 for parts within performance */
+#define NUM_PERFORMANCES 8
+#define PERF_NAME_LEN 12
+
 /* Bank navigation */
 #define MAX_BANKS 64
 static int g_bank_starts[MAX_BANKS];  /* First patch index of each bank */
@@ -751,6 +758,68 @@ static void select_patch(int global_index) {
     fprintf(stderr, "JV880: Selected patch %d: %s\n", global_index, p->name);
 }
 
+/* Switch between patch and performance mode */
+static void set_mode(int performance_mode) {
+    if (!g_mcu) return;
+
+    g_performance_mode = performance_mode ? 1 : 0;
+
+    /* Set mode in NVRAM: 0 = performance, 1 = patch */
+    g_mcu->nvram[NVRAM_MODE_OFFSET] = g_performance_mode ? 0 : 1;
+
+    /* Send program change to trigger mode switch in emulator */
+    uint8_t pc_msg[2] = { 0xC0, 0x00 };
+    int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != g_midi_read) {
+        memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
+        g_midi_queue_len[g_midi_write] = 2;
+        g_midi_write = next;
+    }
+
+    fprintf(stderr, "JV880: Switched to %s mode\n",
+            g_performance_mode ? "Performance" : "Patch");
+}
+
+/* Select a performance (0-7) */
+static void select_performance(int perf_index) {
+    if (!g_mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
+
+    g_current_performance = perf_index;
+
+    /* Ensure we're in performance mode */
+    if (!g_performance_mode) {
+        set_mode(1);
+    }
+
+    /* Send bank select + program change to select performance */
+    /* Bank 0 = User performances 1-8 */
+    uint8_t bank_msg[3] = { 0xB0, 0x00, 0x00 };  /* Bank MSB = 0 */
+    uint8_t pc_msg[2] = { 0xC0, (uint8_t)perf_index };
+
+    int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != g_midi_read) {
+        memcpy(g_midi_queue[g_midi_write], bank_msg, 3);
+        g_midi_queue_len[g_midi_write] = 3;
+        g_midi_write = next;
+    }
+
+    next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != g_midi_read) {
+        memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
+        g_midi_queue_len[g_midi_write] = 2;
+        g_midi_write = next;
+    }
+
+    fprintf(stderr, "JV880: Selected performance %d\n", perf_index + 1);
+}
+
+/* Select a part within the current performance (0-7) */
+static void select_part(int part_index) {
+    if (part_index < 0 || part_index > 7) return;
+    g_current_part = part_index;
+    fprintf(stderr, "JV880: Selected part %d\n", part_index + 1);
+}
+
 /* Get current bank name for display */
 static const char* get_current_bank_name(void) {
     if (g_current_patch < 0 || g_current_patch >= g_total_patches) {
@@ -1137,6 +1206,22 @@ static void jv880_set_param(const char *key, const char *val) {
         jump_to_bank(1);
     } else if (strcmp(key, "prev_bank") == 0) {
         jump_to_bank(-1);
+    } else if (strcmp(key, "mode") == 0) {
+        /* Switch between patch (0) and performance (1) mode */
+        int mode = atoi(val);
+        set_mode(mode);
+    } else if (strcmp(key, "performance") == 0) {
+        /* Select performance 0-7 */
+        int perf = atoi(val);
+        if (perf < 0) perf = 0;
+        if (perf >= NUM_PERFORMANCES) perf = NUM_PERFORMANCES - 1;
+        select_performance(perf);
+    } else if (strcmp(key, "part") == 0) {
+        /* Select part 0-7 within performance */
+        int part = atoi(val);
+        if (part < 0) part = 0;
+        if (part > 7) part = 7;
+        select_part(part);
     }
     /* Note: tempo and clock_mode are now host settings */
 }
@@ -1188,6 +1273,30 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
     }
     if (strcmp(key, "bank_count") == 0) {
         snprintf(buf, buf_len, "%d", g_bank_count);
+        return 1;
+    }
+    if (strcmp(key, "mode") == 0) {
+        snprintf(buf, buf_len, "%d", g_performance_mode);
+        return 1;
+    }
+    if (strcmp(key, "performance_mode") == 0) {
+        snprintf(buf, buf_len, "%d", g_performance_mode);
+        return 1;
+    }
+    if (strcmp(key, "current_performance") == 0) {
+        snprintf(buf, buf_len, "%d", g_current_performance);
+        return 1;
+    }
+    if (strcmp(key, "current_part") == 0) {
+        snprintf(buf, buf_len, "%d", g_current_part);
+        return 1;
+    }
+    if (strcmp(key, "num_performances") == 0) {
+        snprintf(buf, buf_len, "%d", NUM_PERFORMANCES);
+        return 1;
+    }
+    if (strcmp(key, "num_parts") == 0) {
+        snprintf(buf, buf_len, "8");
         return 1;
     }
     /* Note: tempo and clock_mode are now host settings */

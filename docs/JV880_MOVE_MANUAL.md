@@ -68,13 +68,33 @@ Edit/Utility State:
 
 ## Jog + D-pad
 
-Play State:
-- **Left/Right/Jog**: patch change.
-- **SHIFT + Left/Right**: bank change.
+Play State (Patch Mode):
+- **Left/Right/Jog**: patch change (cycles through 192 internal patches + expansions).
+- **SHIFT + Left/Right**: bank change (Preset A, Preset B, Internal, expansions).
+
+Play State (Performance Mode):
+- **Left/Right/Jog**: performance change (cycles through 8 user performances).
+- **SHIFT + Left/Right**: no effect (performances have no banks).
 
 Edit/Utility State:
 - **Left/Right/Up/Down**: parameter selection.
 - **Jog**: value change.
+
+## Patch Mode vs Performance Mode
+
+The JV-880 has two operating modes, switched via Step 1 and Step 2:
+
+**Patch Mode** (Step 1):
+- Single patch plays on MIDI channel 1.
+- 192 internal patches (Preset A, Preset B, Internal) plus expansions.
+- 4 tones per patch, each with independent sound parameters.
+- Ideal for: solo instruments, layered sounds, split keyboards.
+
+**Performance Mode** (Step 2):
+- 8 parts, each on its own MIDI channel (1–8), with Part 8 as Rhythm.
+- 8 user performances stored in NVRAM.
+- Each part references a patch and has level/pan/key range settings.
+- Ideal for: multitimbral setups, layered orchestrations, backing tracks.
 
 ## Track Buttons (4)
 
@@ -83,19 +103,20 @@ Patch Mode:
 - SHIFT + Track toggles tone mute.
 
 Performance Mode:
-- Track 1–4 selects Part within bank.
+- Track 1–4 selects Part 1–4 (or 5–8 with Step 6).
 - SHIFT + Track toggles part mute.
-- Part banks toggle with Step 6 (Parts 1–4 vs 5–8).
+- Step 6 toggles between Parts 1–4 and Parts 5–8.
+- Part 8 is the Rhythm part (drums).
 
 ## Step Buttons (16)
 
 Play State shortcuts:
-1. Patch Mode
-2. Performance Mode
+1. **Patch Mode** - single patch, 4 tones (LED lit when active)
+2. **Performance Mode** - 8 parts, multitimbral (LED lit when active)
 3. Rhythm Focus
 4. FX page
 5. Favorites view (toggle)
-6. Part Bank toggle
+6. Part Bank toggle (Parts 1–4 ↔ 5–8, LED lit for 5–8)
 7. Octave -
 8. Octave +
 9. Transpose -
