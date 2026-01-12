@@ -220,9 +220,12 @@ function setMode(next, force = false) {
     mode = next;
     sendSysEx(buildSystemMode(next));
     host_module_set_param('mode', next === 'performance' ? '1' : '0');
+    /* Reset currentPreset to 0 when switching modes - will sync from plugin */
+    currentPreset = 0;
     updateTrackLEDs();
     updateStepLEDs();
     updateButtonLEDs();
+    needsRedraw = true;
     setHelp(next === 'performance' ? 'PERFORMANCE MODE' : 'PATCH MODE', 2000);
 }
 
@@ -525,12 +528,17 @@ function setTranspose(delta) {
 
 function setPreset(index) {
     if (mode === 'performance') {
-        /* In performance mode, select from 8 performances */
-        if (index < 0) index = 7;
-        if (index > 7) index = 0;
+        /* In performance mode, select from 48 performances (3 banks × 16) */
+        const numPerfs = 48;
+        if (index < 0) index = numPerfs - 1;
+        if (index >= numPerfs) index = 0;
         currentPreset = index;
         host_module_set_param('performance', String(currentPreset));
-        setActivity(`PERF ${currentPreset + 1}`);
+        /* Show bank and number: PA:01-16, PB:01-16, INT:01-16 */
+        const bank = Math.floor(index / 16);
+        const perfInBank = (index % 16) + 1;
+        const bankNames = ['PA', 'PB', 'INT'];
+        setActivity(`${bankNames[bank]}:${String(perfInBank).padStart(2, '0')}`);
     } else {
         /* In patch mode, select from all patches */
         if (index < 0) index = totalPatches - 1;
@@ -1472,13 +1480,26 @@ function updateFromDSP() {
         needsRedraw = true;
     }
 
-    const patch = host_module_get_param('current_patch');
-    if (patch) {
-        const p = parseInt(patch);
-        if (p >= 0 && p !== currentPreset) {
-            currentPreset = p;
-            updateStepLEDs();
-            needsRedraw = true;
+    /* Sync current preset based on mode */
+    if (mode === 'performance') {
+        const perf = host_module_get_param('current_performance');
+        if (perf) {
+            const p = parseInt(perf);
+            if (p >= 0 && p !== currentPreset) {
+                currentPreset = p;
+                updateStepLEDs();
+                needsRedraw = true;
+            }
+        }
+    } else {
+        const patch = host_module_get_param('current_patch');
+        if (patch) {
+            const p = parseInt(patch);
+            if (p >= 0 && p !== currentPreset) {
+                currentPreset = p;
+                updateStepLEDs();
+                needsRedraw = true;
+            }
         }
     }
 
