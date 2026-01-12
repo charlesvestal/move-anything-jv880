@@ -64,14 +64,9 @@ cd move-anything-jv880
 ./scripts/install.sh
 ```
 
-## Usage
+## Editor Manual
 
-- **Left/Right buttons or Jog wheel**: Change preset
-- **Shift + Left/Right**: Jump to next/previous bank (Internal A, Internal B, Expansions)
-- **Up/Down buttons**: Octave transpose (±4 octaves)
-- **Pads**: Play notes
-
-The display shows the current bank name, LCD output from the emulator, and patch number.
+See `docs/JV880_MOVE_MANUAL.md` for the full control map and editor workflow.
 
 ## Editor Manual
 

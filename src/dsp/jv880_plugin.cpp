@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 #include <dirent.h>
 
 #include "mcu.h"
@@ -25,6 +26,10 @@ static MCU *g_mcu = nullptr;
 static char g_module_dir[512];
 static int g_initialized = 0;
 static int g_rom_loaded = 0;
+static int g_debug_sysex = 0;
+static uint8_t g_sysex_buf[512];
+static int g_sysex_len = 0;
+static int g_sysex_capture = 0;
 
 /* Keep ROM2 for internal patch data access */
 static uint8_t *g_rom2 = nullptr;
@@ -32,8 +37,9 @@ static uint8_t *g_rom2 = nullptr;
 /* Patch data constants */
 #define PATCH_SIZE 0x16a  /* 362 bytes per patch */
 #define PATCH_NAME_LEN 12
-#define PATCH_OFFSET_INTERNAL_A 0x010ce0
-#define PATCH_OFFSET_INTERNAL_B 0x018ce0
+#define PATCH_OFFSET_INTERNAL   0x008ce0  /* Internal bank (JV Strings, etc.) */
+#define PATCH_OFFSET_PRESET_A   0x010ce0  /* Preset A (A.Piano 1, etc.) */
+#define PATCH_OFFSET_PRESET_B   0x018ce0  /* Preset B (Pizzicato, etc.) */
 #define NVRAM_PATCH_OFFSET      0x0d70
 #define NVRAM_MODE_OFFSET       0x11
 
@@ -119,6 +125,8 @@ static int g_expansion_file_count = 0;
 /* Background emulation thread */
 static pthread_t g_emu_thread;
 static volatile int g_thread_running = 0;
+static pthread_t g_load_thread;
+static volatile int g_load_thread_running = 0;
 
 /* Audio ring buffer (44.1kHz stereo output) */
 #define AUDIO_RING_SIZE 2048
@@ -129,7 +137,7 @@ static pthread_mutex_t g_ring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* MIDI queue */
 #define MIDI_QUEUE_SIZE 256
-#define MIDI_MSG_MAX_LEN 32
+#define MIDI_MSG_MAX_LEN 256
 static uint8_t g_midi_queue[MIDI_QUEUE_SIZE][MIDI_MSG_MAX_LEN];
 static int g_midi_queue_len[MIDI_QUEUE_SIZE];
 static volatile int g_midi_write = 0;
@@ -155,6 +163,8 @@ static int ring_available(void) {
 static int ring_free(void) {
     return AUDIO_RING_SIZE - 1 - ring_available();
 }
+
+static void *load_thread_func(void *arg);
 
 /* Load ROM file */
 static int load_rom(const char *filename, uint8_t *dest, size_t size) {
@@ -534,39 +544,56 @@ static void build_patch_list(void) {
     g_total_patches = 0;
     g_bank_count = 0;
 
-    /* Internal Bank A (0-63) */
+    /* Preset Bank A (0-63) - Factory presets starting with A.Piano 1 */
     g_bank_starts[g_bank_count] = g_total_patches;
-    strncpy(g_bank_names[g_bank_count], "Internal A", sizeof(g_bank_names[0]) - 1);
+    strncpy(g_bank_names[g_bank_count], "Preset A", sizeof(g_bank_names[0]) - 1);
     g_bank_count++;
 
     for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
         PatchInfo *p = &g_patches[g_total_patches];
-        uint32_t offset = PATCH_OFFSET_INTERNAL_A + (i * PATCH_SIZE);
+        uint32_t offset = PATCH_OFFSET_PRESET_A + (i * PATCH_SIZE);
 
-        /* Copy patch name from ROM2 */
         memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
         p->name[PATCH_NAME_LEN] = '\0';
 
-        p->expansion_index = -1;  /* Internal */
+        p->expansion_index = -1;
         p->local_patch_index = i;
         p->rom_offset = offset;
         g_total_patches++;
     }
 
-    /* Internal Bank B (64-127) */
+    /* Preset Bank B (64-127) - Factory presets starting with Pizzicato */
     g_bank_starts[g_bank_count] = g_total_patches;
-    strncpy(g_bank_names[g_bank_count], "Internal B", sizeof(g_bank_names[0]) - 1);
+    strncpy(g_bank_names[g_bank_count], "Preset B", sizeof(g_bank_names[0]) - 1);
     g_bank_count++;
 
     for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
         PatchInfo *p = &g_patches[g_total_patches];
-        uint32_t offset = PATCH_OFFSET_INTERNAL_B + (i * PATCH_SIZE);
+        uint32_t offset = PATCH_OFFSET_PRESET_B + (i * PATCH_SIZE);
 
         memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
         p->name[PATCH_NAME_LEN] = '\0';
 
         p->expansion_index = -1;
         p->local_patch_index = 64 + i;
+        p->rom_offset = offset;
+        g_total_patches++;
+    }
+
+    /* Internal Bank (128-191) - User patches starting with JV Strings */
+    g_bank_starts[g_bank_count] = g_total_patches;
+    strncpy(g_bank_names[g_bank_count], "Internal", sizeof(g_bank_names[0]) - 1);
+    g_bank_count++;
+
+    for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &g_patches[g_total_patches];
+        uint32_t offset = PATCH_OFFSET_INTERNAL + (i * PATCH_SIZE);
+
+        memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+
+        p->expansion_index = -1;
+        p->local_patch_index = 128 + i;
         p->rom_offset = offset;
         g_total_patches++;
     }
@@ -600,12 +627,8 @@ static void build_patch_list(void) {
         }
     }
 
-    /* Mark loading complete */
-    g_loading_complete = 1;
-    snprintf(g_loading_status, sizeof(g_loading_status), "Ready: %d patches in %d banks", g_total_patches, g_bank_count);
-
-    fprintf(stderr, "JV880: Total patches: %d (128 internal + %d expansion) in %d banks\n",
-            g_total_patches, g_total_patches - 128, g_bank_count);
+    fprintf(stderr, "JV880: Total patches: %d (192 internal + %d expansion) in %d banks\n",
+            g_total_patches, g_total_patches - 192, g_bank_count);
 }
 
 /* Send All Notes Off to prevent stuck notes */
@@ -802,6 +825,12 @@ static int jv880_on_load(const char *module_dir, const char *json_defaults) {
 
     strncpy(g_module_dir, module_dir, sizeof(g_module_dir) - 1);
     fprintf(stderr, "JV880: Loading from %s\n", module_dir);
+    char debug_path[1024];
+    snprintf(debug_path, sizeof(debug_path), "%s/debug_sysex_test", module_dir);
+    if (access(debug_path, F_OK) == 0) {
+        g_debug_sysex = 1;
+        fprintf(stderr, "JV880: SysEx debug enabled (%s)\n", debug_path);
+    }
 
     /* Create emulator instance */
     g_mcu = new MCU();
@@ -857,68 +886,21 @@ static int jv880_on_load(const char *module_dir, const char *json_defaults) {
     /* Set patch mode */
     g_mcu->nvram[NVRAM_MODE_OFFSET] = 1;
 
-    /* Scan expansion file list (just filenames, fast) */
-    snprintf(g_loading_status, sizeof(g_loading_status), "Checking expansions...");
-    scan_expansion_files();
-    fprintf(stderr, "JV880: Found %d expansion files\n", g_expansion_file_count);
+    g_loading_complete = 0;
+    snprintf(g_loading_status, sizeof(g_loading_status), "Loading...");
 
-    /* Try to load from cache first */
-    int cache_valid = load_cache();
-
-    if (!cache_valid) {
-        /* Cache miss - do full scan */
-        fprintf(stderr, "JV880: Cache miss, scanning expansions...\n");
-        snprintf(g_loading_status, sizeof(g_loading_status), "Scanning expansions...");
-        scan_expansions();
-        build_patch_list();
-        save_cache();
-    } else {
-        /* Cache hit - expansion ROM data will be loaded on demand */
-        fprintf(stderr, "JV880: Using cached patch data\n");
-        g_loading_complete = 1;
-        snprintf(g_loading_status, sizeof(g_loading_status), "Ready: %d patches", g_total_patches);
-    }
-
-    /* Warmup */
-    fprintf(stderr, "JV880: Running warmup...\n");
-    for (int i = 0; i < 100000; i++) {
-        g_mcu->updateSC55(1);
-    }
-    fprintf(stderr, "JV880: Warmup done\n");
-
-    /* Pre-fill audio buffer */
-    g_ring_write = 0;
-    g_ring_read = 0;
-
-    float resample_acc = 0.0f;
-    const float ratio = (float)JV880_SAMPLE_RATE / (float)MOVE_SAMPLE_RATE;
-
-    fprintf(stderr, "JV880: Pre-filling buffer...\n");
-    for (int i = 0; i < 256; i++) {
-        g_mcu->updateSC55(8);
-        int avail = g_mcu->sample_write_ptr;
-        for (int j = 0; j < avail; j += 2) {
-            resample_acc += 1.0f;
-            if (resample_acc >= ratio) {
-                resample_acc -= ratio;
-                g_audio_ring[g_ring_write * 2 + 0] = g_mcu->sample_buffer[j];
-                g_audio_ring[g_ring_write * 2 + 1] = g_mcu->sample_buffer[j + 1];
-                g_ring_write = (g_ring_write + 1) % AUDIO_RING_SIZE;
-            }
-        }
-    }
-    fprintf(stderr, "JV880: Buffer pre-filled: %d samples\n", g_ring_write);
-
-    /* Start emulation thread */
-    g_thread_running = 1;
-    pthread_create(&g_emu_thread, NULL, emu_thread_func, NULL);
-
-    g_initialized = 1;
-    fprintf(stderr, "JV880: Ready!\n");
+    /* Load patches/expansions and warmup in background so UI can render. */
+    g_load_thread_running = 1;
+    pthread_create(&g_load_thread, NULL, load_thread_func, NULL);
     return 0;
 }
 
 static void jv880_on_unload(void) {
+    if (g_load_thread_running) {
+        g_load_thread_running = 0;
+        pthread_join(g_load_thread, NULL);
+    }
+
     if (g_thread_running) {
         g_thread_running = 0;
         pthread_join(g_emu_thread, NULL);
@@ -950,12 +932,56 @@ static void jv880_on_unload(void) {
 }
 
 static void jv880_on_midi(const uint8_t *msg, int len, int source) {
-    (void)source;
-
     if (!g_initialized || !g_thread_running) return;
     if (len < 1) return;
 
     uint8_t status = msg[0] & 0xF0;
+    if (g_debug_sysex) {
+        for (int i = 0; i < len; i++) {
+            uint8_t b = msg[i];
+            if (b == 0xF0) {
+                g_sysex_capture = 1;
+                g_sysex_len = 0;
+            }
+            if (g_sysex_capture) {
+                if (g_sysex_len < (int)sizeof(g_sysex_buf)) {
+                    g_sysex_buf[g_sysex_len++] = b;
+                }
+                if (b == 0xF7 || g_sysex_len >= (int)sizeof(g_sysex_buf)) {
+                    uint8_t dev = (g_sysex_len > 2) ? g_sysex_buf[2] : 0;
+                    uint8_t model = (g_sysex_len > 3) ? g_sysex_buf[3] : 0;
+                    uint8_t cmd = (g_sysex_len > 4) ? g_sysex_buf[4] : 0;
+                    int data_len = g_sysex_len - 11;
+                    if (data_len < 0) data_len = 0;
+                    fprintf(stderr,
+                            "JV880: SysEx packet len=%d dev=%02x model=%02x cmd=%02x data=%d\n",
+                            g_sysex_len, dev, model, cmd, data_len);
+                    if (g_sysex_len >= 12 && cmd == 0x12) {
+                        uint8_t a0 = g_sysex_buf[5];
+                        uint8_t a1 = g_sysex_buf[6];
+                        uint8_t a2 = g_sysex_buf[7];
+                        uint8_t a3 = g_sysex_buf[8];
+                        uint8_t d0 = g_sysex_buf[9];
+                        uint8_t mode = g_mcu ? g_mcu->nvram[NVRAM_MODE_OFFSET] : 0;
+                        fprintf(stderr,
+                                "JV880: SysEx addr=%02x %02x %02x %02x data0=%02x mode_nvram=%02x\n",
+                                a0, a1, a2, a3, d0, mode);
+                    }
+                    g_sysex_capture = 0;
+                    g_sysex_len = 0;
+                }
+            }
+        }
+    }
+
+    /* Filter Move control notes (steps/track rows/knob touch) from internal MIDI. */
+    if (source == MOVE_MIDI_SOURCE_INTERNAL && (status == 0x90 || status == 0x80) && len >= 2) {
+        const uint8_t note = msg[1];
+        const bool is_step = (note >= 16 && note <= 31);
+        const bool is_track_row = (note >= 40 && note <= 43);
+        const bool is_knob_touch = (note < 10);
+        if (is_step || is_track_row || is_knob_touch) return;
+    }
 
     /* Copy message so we can modify it */
     uint8_t modified[MIDI_MSG_MAX_LEN];
@@ -1000,6 +1026,99 @@ static void jump_to_bank(int direction) {
 
     select_patch(g_bank_starts[new_bank]);
     fprintf(stderr, "JV880: Jumped to bank %d: %s\n", new_bank, g_bank_names[new_bank]);
+}
+
+static void enforce_min_loading_time(const struct timespec *start_ts, int min_ms) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed_ms = (now.tv_sec - start_ts->tv_sec) * 1000L +
+                      (now.tv_nsec - start_ts->tv_nsec) / 1000000L;
+    if (elapsed_ms >= min_ms) return;
+    int remain_ms = min_ms - (int)elapsed_ms;
+    struct timespec sleep_ts;
+    sleep_ts.tv_sec = remain_ms / 1000;
+    sleep_ts.tv_nsec = (remain_ms % 1000) * 1000000L;
+    nanosleep(&sleep_ts, NULL);
+}
+
+static void *load_thread_func(void *arg) {
+    (void)arg;
+
+    struct timespec start_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+
+    /* Scan expansion file list (just filenames, fast) */
+    snprintf(g_loading_status, sizeof(g_loading_status), "Checking expansions...");
+    scan_expansion_files();
+    fprintf(stderr, "JV880: Found %d expansion files\n", g_expansion_file_count);
+
+    /* Try to load from cache first */
+    int cache_valid = load_cache();
+
+    if (!cache_valid) {
+        /* Cache miss - do full scan */
+        fprintf(stderr, "JV880: Cache miss, scanning expansions...\n");
+        snprintf(g_loading_status, sizeof(g_loading_status), "Scanning expansions...");
+        scan_expansions();
+        build_patch_list();
+        save_cache();
+    } else {
+        /* Cache hit - expansion ROM data will be loaded on demand */
+        fprintf(stderr, "JV880: Using cached patch data\n");
+    }
+
+    /* Ensure a known starting patch ("A. Piano 1" in Internal A) */
+    if (g_total_patches > 0) {
+        select_patch(0);
+    }
+
+    /* Warmup */
+    fprintf(stderr, "JV880: Running warmup...\n");
+    snprintf(g_loading_status, sizeof(g_loading_status), "Warming up...");
+    for (int i = 0; i < 100000; i++) {
+        g_mcu->updateSC55(1);
+    }
+    fprintf(stderr, "JV880: Warmup done\n");
+
+    /* Pre-fill audio buffer */
+    g_ring_write = 0;
+    g_ring_read = 0;
+
+    float resample_acc = 0.0f;
+    const float ratio = (float)JV880_SAMPLE_RATE / (float)MOVE_SAMPLE_RATE;
+
+    fprintf(stderr, "JV880: Pre-filling buffer...\n");
+    snprintf(g_loading_status, sizeof(g_loading_status), "Preparing audio...");
+    for (int i = 0; i < 256; i++) {
+        g_mcu->updateSC55(8);
+        int avail = g_mcu->sample_write_ptr;
+        for (int j = 0; j < avail; j += 2) {
+            resample_acc += 1.0f;
+            if (resample_acc >= ratio) {
+                resample_acc -= ratio;
+                g_audio_ring[g_ring_write * 2 + 0] = g_mcu->sample_buffer[j];
+                g_audio_ring[g_ring_write * 2 + 1] = g_mcu->sample_buffer[j + 1];
+                g_ring_write = (g_ring_write + 1) % AUDIO_RING_SIZE;
+            }
+        }
+    }
+    fprintf(stderr, "JV880: Buffer pre-filled: %d samples\n", g_ring_write);
+
+    /* Start emulation thread */
+    g_thread_running = 1;
+    pthread_create(&g_emu_thread, NULL, emu_thread_func, NULL);
+
+    /* Ensure the loading screen is visible at least briefly. */
+    enforce_min_loading_time(&start_ts, 200);
+
+    g_initialized = 1;
+    g_loading_complete = 1;
+    snprintf(g_loading_status, sizeof(g_loading_status),
+             "Ready: %d patches in %d banks", g_total_patches, g_bank_count);
+
+    fprintf(stderr, "JV880: Ready!\n");
+    g_load_thread_running = 0;
+    return NULL;
 }
 
 static void jv880_set_param(const char *key, const char *val) {
