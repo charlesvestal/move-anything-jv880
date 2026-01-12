@@ -219,6 +219,7 @@ function setMode(next, force = false) {
     if (!force && mode === next) return;
     mode = next;
     sendSysEx(buildSystemMode(next));
+    host_module_set_param('mode', next === 'performance' ? '1' : '0');
     updateTrackLEDs();
     updateStepLEDs();
     updateButtonLEDs();
@@ -523,16 +524,31 @@ function setTranspose(delta) {
 }
 
 function setPreset(index) {
-    if (index < 0) index = totalPatches - 1;
-    if (index >= totalPatches) index = 0;
-    currentPreset = index;
-    host_module_set_param('program_change', String(currentPreset));
-    setActivity(`PATCH ${currentPreset + 1}`);
+    if (mode === 'performance') {
+        /* In performance mode, select from 8 performances */
+        if (index < 0) index = 7;
+        if (index > 7) index = 0;
+        currentPreset = index;
+        host_module_set_param('performance', String(currentPreset));
+        setActivity(`PERF ${currentPreset + 1}`);
+    } else {
+        /* In patch mode, select from all patches */
+        if (index < 0) index = totalPatches - 1;
+        if (index >= totalPatches) index = 0;
+        currentPreset = index;
+        host_module_set_param('program_change', String(currentPreset));
+        setActivity(`PATCH ${currentPreset + 1}`);
+    }
     updateStepLEDs();
     needsRedraw = true;
 }
 
 function jumpBank(direction) {
+    if (mode === 'performance') {
+        /* No banks in performance mode - just 8 performances */
+        setActivity('NO BANKS');
+        return;
+    }
     host_module_set_param(direction > 0 ? 'next_bank' : 'prev_bank', '1');
     setActivity(direction > 0 ? 'BANK +' : 'BANK -');
     needsRedraw = true;
@@ -1147,6 +1163,7 @@ function handleTrack(trackIndex) {
     const part = clamp(partBank * 4 + trackIndex, 0, 7);
     selectedPart = part;
     rhythmFocus = selectedPart === 7;
+    host_module_set_param('part', String(selectedPart));
     updateTrackLEDs();
     updateButtonLEDs();
     setActivity(`PART ${selectedPart + 1}`);
