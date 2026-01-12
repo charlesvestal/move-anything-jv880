@@ -37,8 +37,9 @@ static uint8_t *g_rom2 = nullptr;
 /* Patch data constants */
 #define PATCH_SIZE 0x16a  /* 362 bytes per patch */
 #define PATCH_NAME_LEN 12
-#define PATCH_OFFSET_INTERNAL_A 0x010ce0
-#define PATCH_OFFSET_INTERNAL_B 0x018ce0
+#define PATCH_OFFSET_INTERNAL   0x008ce0  /* Internal bank (JV Strings, etc.) */
+#define PATCH_OFFSET_PRESET_A   0x010ce0  /* Preset A (A.Piano 1, etc.) */
+#define PATCH_OFFSET_PRESET_B   0x018ce0  /* Preset B (Pizzicato, etc.) */
 #define NVRAM_PATCH_OFFSET      0x0d70
 #define NVRAM_MODE_OFFSET       0x11
 
@@ -543,39 +544,56 @@ static void build_patch_list(void) {
     g_total_patches = 0;
     g_bank_count = 0;
 
-    /* Internal Bank A (0-63) */
+    /* Preset Bank A (0-63) - Factory presets starting with A.Piano 1 */
     g_bank_starts[g_bank_count] = g_total_patches;
-    strncpy(g_bank_names[g_bank_count], "Internal A", sizeof(g_bank_names[0]) - 1);
+    strncpy(g_bank_names[g_bank_count], "Preset A", sizeof(g_bank_names[0]) - 1);
     g_bank_count++;
 
     for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
         PatchInfo *p = &g_patches[g_total_patches];
-        uint32_t offset = PATCH_OFFSET_INTERNAL_A + (i * PATCH_SIZE);
+        uint32_t offset = PATCH_OFFSET_PRESET_A + (i * PATCH_SIZE);
 
-        /* Copy patch name from ROM2 */
         memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
         p->name[PATCH_NAME_LEN] = '\0';
 
-        p->expansion_index = -1;  /* Internal */
+        p->expansion_index = -1;
         p->local_patch_index = i;
         p->rom_offset = offset;
         g_total_patches++;
     }
 
-    /* Internal Bank B (64-127) */
+    /* Preset Bank B (64-127) - Factory presets starting with Pizzicato */
     g_bank_starts[g_bank_count] = g_total_patches;
-    strncpy(g_bank_names[g_bank_count], "Internal B", sizeof(g_bank_names[0]) - 1);
+    strncpy(g_bank_names[g_bank_count], "Preset B", sizeof(g_bank_names[0]) - 1);
     g_bank_count++;
 
     for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
         PatchInfo *p = &g_patches[g_total_patches];
-        uint32_t offset = PATCH_OFFSET_INTERNAL_B + (i * PATCH_SIZE);
+        uint32_t offset = PATCH_OFFSET_PRESET_B + (i * PATCH_SIZE);
 
         memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
         p->name[PATCH_NAME_LEN] = '\0';
 
         p->expansion_index = -1;
         p->local_patch_index = 64 + i;
+        p->rom_offset = offset;
+        g_total_patches++;
+    }
+
+    /* Internal Bank (128-191) - User patches starting with JV Strings */
+    g_bank_starts[g_bank_count] = g_total_patches;
+    strncpy(g_bank_names[g_bank_count], "Internal", sizeof(g_bank_names[0]) - 1);
+    g_bank_count++;
+
+    for (int i = 0; i < 64 && g_total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &g_patches[g_total_patches];
+        uint32_t offset = PATCH_OFFSET_INTERNAL + (i * PATCH_SIZE);
+
+        memcpy(p->name, &g_rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+
+        p->expansion_index = -1;
+        p->local_patch_index = 128 + i;
         p->rom_offset = offset;
         g_total_patches++;
     }
@@ -609,8 +627,8 @@ static void build_patch_list(void) {
         }
     }
 
-    fprintf(stderr, "JV880: Total patches: %d (128 internal + %d expansion) in %d banks\n",
-            g_total_patches, g_total_patches - 128, g_bank_count);
+    fprintf(stderr, "JV880: Total patches: %d (192 internal + %d expansion) in %d banks\n",
+            g_total_patches, g_total_patches - 192, g_bank_count);
 }
 
 /* Send All Notes Off to prevent stuck notes */
