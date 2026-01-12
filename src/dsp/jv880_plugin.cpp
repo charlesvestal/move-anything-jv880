@@ -26,6 +26,8 @@ static MCU *g_mcu = nullptr;
 static char g_module_dir[512];
 static int g_initialized = 0;
 static int g_rom_loaded = 0;
+static int g_led_test_done = 0;
+static int g_render_count = 0;
 static int g_debug_sysex = 0;
 static uint8_t g_sysex_buf[512];
 static int g_sysex_len = 0;
@@ -78,9 +80,12 @@ static int g_current_patch = 0;
 
 /* Performance mode support */
 static int g_performance_mode = 0;  /* 0 = patch mode, 1 = performance mode */
-static int g_current_performance = 0;  /* 0-7 for user performances */
+static int g_current_performance = 0;  /* 0-47 for all performances (3 banks x 16) */
 static int g_current_part = 0;  /* 0-7 for parts within performance */
-#define NUM_PERFORMANCES 8
+static int g_perf_bank = 0;  /* 0=Preset A, 1=Preset B, 2=Internal */
+#define NUM_PERF_BANKS 3
+#define PERFS_PER_BANK 16
+#define NUM_PERFORMANCES (NUM_PERF_BANKS * PERFS_PER_BANK)  /* 48 total */
 #define PERF_NAME_LEN 12
 
 /* Bank navigation */
@@ -92,6 +97,35 @@ static int g_bank_count = 0;
 /* Loading status for UI */
 static char g_loading_status[256] = "Initializing...";
 static int g_loading_complete = 0;
+
+/* UI State Machine for LED rendering
+ *
+ * JV-880 LED behavior:
+ * - Buttons are IDEMPOTENT (re-pressing active state = no-op)
+ * - LEDs reflect (mode, context) state only
+ * - Mode change clears context
+ * - EXIT clears context
+ *
+ * Mode: PATCH | PERFORM | RHYTHM (one always active, mutually exclusive)
+ * Context: NONE | EDIT | SYSTEM | UTILITY (overlay, can be cleared)
+ * Tone switches: 4 independent states (patch mode only)
+ */
+enum UiMode {
+    MODE_PATCH = 0,    /* Single patch mode */
+    MODE_PERFORM,      /* Performance (multi-timbral) mode */
+    MODE_RHYTHM        /* Rhythm/drum mode */
+};
+
+enum UiContext {
+    CTX_PLAY = 0,      /* Normal play mode - no context LEDs lit */
+    CTX_EDIT,          /* EDIT - editing patch/performance/rhythm (toggles with EDIT button) */
+    CTX_SYSTEM,        /* SYSTEM - system settings (idempotent) */
+    CTX_UTILITY        /* UTILITY - utility menu (idempotent) */
+};
+
+static UiMode g_ui_mode = MODE_PATCH;
+static UiContext g_ui_context = CTX_PLAY;
+static int g_tone_switch[4] = {1, 1, 1, 1};  /* Tone 1-4 on/off state */
 
 /* Progressive loading state machine */
 enum LoadingPhase {
@@ -521,6 +555,13 @@ static int scan_expansion_rom(const char *filename, ExpansionInfo *info) {
     return 1;
 }
 
+/* Compare function for sorting expansions alphabetically by name */
+static int compare_expansions(const void *a, const void *b) {
+    const ExpansionInfo *exp_a = (const ExpansionInfo *)a;
+    const ExpansionInfo *exp_b = (const ExpansionInfo *)b;
+    return strcasecmp(exp_a->name, exp_b->name);
+}
+
 /* Scan for expansion ROMs and build patch list */
 static void scan_expansions(void) {
     char exp_dir[1024];
@@ -542,6 +583,11 @@ static void scan_expansions(void) {
         }
     }
     closedir(dir);
+
+    /* Sort expansions alphabetically by name */
+    if (g_expansion_count > 1) {
+        qsort(g_expansions, g_expansion_count, sizeof(ExpansionInfo), compare_expansions);
+    }
 
     fprintf(stderr, "JV880: Found %d expansion ROMs\n", g_expansion_count);
 }
@@ -758,44 +804,180 @@ static void select_patch(int global_index) {
     fprintf(stderr, "JV880: Selected patch %d: %s\n", global_index, p->name);
 }
 
-/* Switch between patch and performance mode */
+/* Automated LED reverse engineering test
+ * Minimal test - just cycle modes and watch stderr for IO writes
+ */
+static void run_automated_led_test() {
+    fprintf(stderr, "JV880: LED test starting, g_mcu=%p\n", (void*)g_mcu);
+
+    FILE *f = fopen("/data/UserData/jv880_led_auto.txt", "w");
+    if (!f) {
+        fprintf(stderr, "JV880: Failed to open LED test file\n");
+        return;
+    }
+
+    fprintf(f, "JV-880 LED Test - Watch stderr for IO writes\n");
+    fprintf(f, "=============================================\n\n");
+    fflush(f);
+
+    if (!g_mcu) {
+        fprintf(f, "ERROR: g_mcu is NULL\n");
+        fclose(f);
+        return;
+    }
+
+    /* Helper to log LED state */
+    auto log_leds = [&](const char* label) {
+        fprintf(f, "  LED state: mode=%02X tone=%02X\n",
+                g_mcu->led_mode_state, g_mcu->led_tone_state);
+        fprintf(stderr, "JV880: %s LEDs: mode=%02X tone=%02X\n",
+                label, g_mcu->led_mode_state, g_mcu->led_tone_state);
+    };
+
+    /* Helper to press and release a button */
+    auto do_button = [&](int btn, const char* name) {
+        fprintf(stderr, "JV880: >>> Pressing button %d (%s)\n", btn, name);
+        g_mcu->mcu_button_pressed |= (1 << btn);
+        for (int i = 0; i < 5; i++) g_mcu->updateSC55(1000);
+        g_mcu->mcu_button_pressed &= ~(1 << btn);
+        for (int i = 0; i < 15; i++) g_mcu->updateSC55(1000);  /* More cycles for LED update */
+        fprintf(stderr, "JV880: LCD=[%.20s]\n", g_mcu->lcd.GetLine(0));
+        log_leds(name);
+    };
+
+    fprintf(f, "Initial LCD: [%.24s]\n", g_mcu->lcd.GetLine(0));
+    fprintf(stderr, "JV880: Initial LCD=[%.20s]\n", g_mcu->lcd.GetLine(0));
+    log_leds("Initial");
+
+    /* Test EDIT */
+    fprintf(f, "\n=== EDIT ===\n");
+    do_button(MCU_BUTTON_EDIT, "EDIT");
+    fprintf(f, "After EDIT: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+
+    /* Test SYSTEM */
+    fprintf(f, "\n=== SYSTEM ===\n");
+    do_button(MCU_BUTTON_SYSTEM, "SYSTEM");
+    fprintf(f, "After SYSTEM: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+
+    /* Test RHYTHM */
+    fprintf(f, "\n=== RHYTHM ===\n");
+    do_button(MCU_BUTTON_RHYTHM, "RHYTHM");
+    fprintf(f, "After RHYTHM: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+
+    /* Test UTILITY */
+    fprintf(f, "\n=== UTILITY ===\n");
+    do_button(MCU_BUTTON_UTILITY, "UTILITY");
+    fprintf(f, "After UTILITY: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+
+    /* Test PATCH/PERFORM toggle - should switch modes */
+    fprintf(stderr, "JV880: About to test PATCH/PERFORM button\n");
+    fprintf(f, "\n=== PATCH/PERFORM ===\n");
+    fflush(f);
+    do_button(MCU_BUTTON_PATCH_PERFORM, "PATCH/PERFORM");
+    fprintf(f, "After PATCH/PERFORM: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+    fflush(f);
+
+    /* Return to PATCH mode by pressing PATCH/PERFORM from main screen */
+    /* First exit UTILITY by pressing it again */
+    fprintf(f, "\n=== Return to PATCH ===\n");
+    do_button(MCU_BUTTON_UTILITY, "EXIT_UTILITY");  /* Exit utility */
+    do_button(MCU_BUTTON_PATCH_PERFORM, "PATCH/PERFORM");
+    fprintf(f, "After return: LCD=[%.24s]\n", g_mcu->lcd.GetLine(0));
+    log_leds("Final");
+
+    fflush(f);
+
+    fprintf(f, "\n=== TEST COMPLETE ===\n");
+    fclose(f);
+
+    fprintf(stderr, "JV880: LED test complete -> /data/UserData/jv880_led_auto.txt\n");
+}
+
+/* Switch between patch and performance mode
+ * Sets NVRAM mode flag and simulates PATCH/PERFORM button press
+ */
 static void set_mode(int performance_mode) {
     if (!g_mcu) return;
 
-    g_performance_mode = performance_mode ? 1 : 0;
+    int new_mode = performance_mode ? 1 : 0;
+
+    /* Only switch if mode is actually changing */
+    if (g_performance_mode == new_mode) return;
+
+    g_performance_mode = new_mode;
 
     /* Set mode in NVRAM: 0 = performance, 1 = patch */
     g_mcu->nvram[NVRAM_MODE_OFFSET] = g_performance_mode ? 0 : 1;
 
-    /* Send program change to trigger mode switch in emulator */
-    uint8_t pc_msg[2] = { 0xC0, 0x00 };
-    int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
-    if (next != g_midi_read) {
-        memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
-        g_midi_queue_len[g_midi_write] = 2;
-        g_midi_write = next;
-    }
+    /* Simulate pressing PATCH/PERFORM button to trigger mode switch in emulator */
+    g_mcu->mcu_button_pressed |= (1 << MCU_BUTTON_PATCH_PERFORM);
 
-    fprintf(stderr, "JV880: Switched to %s mode\n",
-            g_performance_mode ? "Performance" : "Patch");
+    fprintf(stderr, "JV880: Switched to %s mode (NVRAM[0x11]=0x%02x, button pressed)\n",
+            g_performance_mode ? "Performance" : "Patch",
+            g_mcu->nvram[NVRAM_MODE_OFFSET]);
 }
 
-/* Select a performance (0-7) */
+/* Simulate pressing an MCU button (set bit to trigger press, then clear) */
+static void press_mcu_button(int button) {
+    if (!g_mcu || button < 0 || button > 31) return;
+    g_mcu->mcu_button_pressed |= (1 << button);
+}
+
+static void release_mcu_button(int button) {
+    if (!g_mcu || button < 0 || button > 31) return;
+    g_mcu->mcu_button_pressed &= ~(1 << button);
+}
+
+/* Select a performance (0-47 across 3 banks) using MIDI bank select + program change.
+ *
+ * JV-880 Performance selection via MIDI (on Control Channel, default ch 16):
+ *   Bank 80 + PC 1-16  → Internal Performances 1-16
+ *   Bank 81 + PC 1-16  → Preset A Performances 1-16
+ *   Bank 81 + PC 65-80 → Preset B Performances 1-16
+ *
+ * Our mapping (0-indexed):
+ *   perf_index 0-15  (bank 0) = Preset A  → Bank 81, PC 0-15
+ *   perf_index 16-31 (bank 1) = Preset B  → Bank 81, PC 64-79
+ *   perf_index 32-47 (bank 2) = Internal  → Bank 80, PC 0-15
+ */
 static void select_performance(int perf_index) {
     if (!g_mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
 
     g_current_performance = perf_index;
+    g_perf_bank = perf_index / PERFS_PER_BANK;
+    int perf_in_bank = perf_index % PERFS_PER_BANK;
 
     /* Ensure we're in performance mode */
     if (!g_performance_mode) {
         set_mode(1);
     }
 
-    /* Send bank select + program change to select performance */
-    /* Bank 0 = User performances 1-8 */
-    uint8_t bank_msg[3] = { 0xB0, 0x00, 0x00 };  /* Bank MSB = 0 */
-    uint8_t pc_msg[2] = { 0xC0, (uint8_t)perf_index };
+    /* Calculate bank select and program change values per JV-880 MIDI spec */
+    uint8_t bank_msb;
+    uint8_t pc_value;
 
+    switch (g_perf_bank) {
+        case 0:  /* Preset A */
+            bank_msb = 81;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+        case 1:  /* Preset B */
+            bank_msb = 81;
+            pc_value = 64 + perf_in_bank;  /* 64-79 */
+            break;
+        case 2:  /* Internal */
+        default:
+            bank_msb = 80;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+    }
+
+    /* Send on Control Channel (channel 16 = 0x0F, so status bytes are 0xBF/0xCF) */
+    uint8_t ctrl_ch = 0x0F;  /* Channel 16 (0-indexed) */
+    uint8_t bank_msg[3] = { (uint8_t)(0xB0 | ctrl_ch), 0x00, bank_msb };
+    uint8_t pc_msg[2] = { (uint8_t)(0xC0 | ctrl_ch), pc_value };
+
+    /* Queue Bank Select (CC#0) */
     int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
     if (next != g_midi_read) {
         memcpy(g_midi_queue[g_midi_write], bank_msg, 3);
@@ -803,6 +985,7 @@ static void select_performance(int perf_index) {
         g_midi_write = next;
     }
 
+    /* Queue Program Change */
     next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
     if (next != g_midi_read) {
         memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
@@ -810,7 +993,9 @@ static void select_performance(int perf_index) {
         g_midi_write = next;
     }
 
-    fprintf(stderr, "JV880: Selected performance %d\n", perf_index + 1);
+    const char* bank_names[] = { "Preset A", "Preset B", "Internal" };
+    fprintf(stderr, "JV880: Selected %s performance %d (ch16: Bank=%d PC=%d)\n",
+            bank_names[g_perf_bank], perf_in_bank + 1, bank_msb, pc_value);
 }
 
 /* Select a part within the current performance (0-7) */
@@ -1186,6 +1371,7 @@ static void *load_thread_func(void *arg) {
              "Ready: %d patches in %d banks", g_total_patches, g_bank_count);
 
     fprintf(stderr, "JV880: Ready!\n");
+
     g_load_thread_running = 0;
     return NULL;
 }
@@ -1222,6 +1408,273 @@ static void jv880_set_param(const char *key, const char *val) {
         if (part < 0) part = 0;
         if (part > 7) part = 7;
         select_part(part);
+    } else if (strcmp(key, "led_test") == 0) {
+        /* Fully automated LED reverse engineering test
+         * Runs without any user interaction, writes summary to file */
+        if (!g_mcu) return;
+
+        FILE *f = fopen("/data/UserData/jv880_led_auto.txt", "w");
+        if (!f) f = stderr;
+
+        fprintf(f, "JV-880 Automated LED Test\n");
+        fprintf(f, "=========================\n\n");
+
+        /* Structure to capture state */
+        struct Snapshot {
+            uint8_t p7dr_raw[4];
+            uint8_t io_sd;
+            uint8_t dev_p7ddr;
+            uint8_t dev_p7dr;
+            char lcd0[32];
+            char lcd1[32];
+        };
+
+        auto capture = [&](Snapshot* s) {
+            memcpy(s->p7dr_raw, g_mcu->led_state_raw, 4);
+            s->io_sd = g_mcu->io_sd;
+            s->dev_p7ddr = g_mcu->dev_register[0x0C];
+            s->dev_p7dr = g_mcu->dev_register[0x0E];
+            strncpy(s->lcd0, g_mcu->lcd.GetLine(0), 31);
+            strncpy(s->lcd1, g_mcu->lcd.GetLine(1), 31);
+            s->lcd0[31] = s->lcd1[31] = 0;
+        };
+
+        auto print_snapshot = [&](const char* label, Snapshot* s) {
+            fprintf(f, "%s:\n", label);
+            fprintf(f, "  P7DR_raw: [%02X %02X %02X %02X]\n",
+                    s->p7dr_raw[0], s->p7dr_raw[1], s->p7dr_raw[2], s->p7dr_raw[3]);
+            fprintf(f, "  io_sd=%02X P7DDR=%02X P7DR=%02X\n",
+                    s->io_sd, s->dev_p7ddr, s->dev_p7dr);
+            fprintf(f, "  LCD: [%s] [%s]\n\n", s->lcd0, s->lcd1);
+        };
+
+        auto press_and_release = [&](int btn, int samples) {
+            g_mcu->mcu_button_pressed |= (1 << btn);
+            g_mcu->updateSC55(samples);
+            g_mcu->mcu_button_pressed &= ~(1 << btn);
+            g_mcu->updateSC55(samples);
+        };
+
+        Snapshot before, after;
+
+        /* Test each button */
+        const int buttons[] = {MCU_BUTTON_EDIT, MCU_BUTTON_SYSTEM, MCU_BUTTON_RHYTHM, MCU_BUTTON_UTILITY};
+        const char* names[] = {"EDIT", "SYSTEM", "RHYTHM", "UTILITY"};
+
+        /* Settle first */
+        g_mcu->updateSC55(10000);
+
+        for (int i = 0; i < 4; i++) {
+            fprintf(f, "=== TEST: %s (button %d) ===\n", names[i], buttons[i]);
+
+            /* Capture before */
+            capture(&before);
+            print_snapshot("BEFORE", &before);
+
+            /* Press and release */
+            press_and_release(buttons[i], 5000);
+
+            /* Capture after */
+            capture(&after);
+            print_snapshot("AFTER", &after);
+
+            /* Show what changed */
+            fprintf(f, "CHANGES:\n");
+            for (int j = 0; j < 4; j++) {
+                if (before.p7dr_raw[j] != after.p7dr_raw[j]) {
+                    fprintf(f, "  p7dr_raw[%d]: %02X -> %02X\n", j, before.p7dr_raw[j], after.p7dr_raw[j]);
+                }
+            }
+            if (before.dev_p7dr != after.dev_p7dr) {
+                fprintf(f, "  P7DR: %02X -> %02X\n", before.dev_p7dr, after.dev_p7dr);
+            }
+            if (strcmp(before.lcd0, after.lcd0) != 0) {
+                fprintf(f, "  LCD changed\n");
+            }
+            fprintf(f, "\n");
+
+            /* Return to base state - press again to toggle back */
+            press_and_release(buttons[i], 5000);
+            g_mcu->updateSC55(5000);
+        }
+
+        fprintf(f, "=== TEST COMPLETE ===\n");
+
+        if (f != stderr) fclose(f);
+        fprintf(stderr, "JV880: LED test complete -> /data/UserData/jv880_led_auto.txt\n");
+    } else if (strcmp(key, "encoder") == 0) {
+        /* Data entry dial/encoder - used by jog wheel */
+        int dir = atoi(val);  /* 0 = increment (CW), 1 = decrement (CCW) */
+        if (g_mcu) {
+            g_mcu->MCU_EncoderTrigger(dir);
+        }
+    } else if (strcmp(key, "button_press") == 0) {
+        /* Simulate MCU button press */
+        int button = atoi(val);
+        if (g_mcu && button >= 0 && button < 32) {
+            g_mcu->mcu_button_pressed |= (1 << button);
+            fprintf(stderr, "JV880: Button %d pressed\n", button);
+
+            /* UI State Machine: process button events
+             * JV-880 behavior per owner's manual:
+             * - PATCH/PERFORM: TOGGLES between Patch and Performance each press
+             * - RHYTHM: Enters Rhythm mode (idempotent)
+             * - EDIT: TOGGLES between play and edit (this is the exit mechanism)
+             * - UTILITY: Enters utility (idempotent)
+             * - SYSTEM: Enters system (idempotent)
+             * - Mode change returns to PLAY context
+             */
+            switch (button) {
+                /* MODE BUTTONS */
+                case MCU_BUTTON_PATCH_PERFORM:
+                    /* Toggle between PATCH and PERFORM each press */
+                    if (g_ui_mode == MODE_PATCH) {
+                        g_ui_mode = MODE_PERFORM;
+                        g_performance_mode = 1;  /* Update LED state tracking */
+                    } else {
+                        /* From PERFORM or RHYTHM, go to PATCH */
+                        g_ui_mode = MODE_PATCH;
+                        g_performance_mode = 0;  /* Update LED state tracking */
+                    }
+                    g_ui_context = CTX_PLAY;  /* Mode change returns to play */
+                    break;
+
+                case MCU_BUTTON_RHYTHM:
+                    /* Enter RHYTHM mode (idempotent - no-op if already in RHYTHM) */
+                    if (g_ui_mode != MODE_RHYTHM) {
+                        g_ui_mode = MODE_RHYTHM;
+                        g_ui_context = CTX_PLAY;  /* Mode change returns to play */
+                    }
+                    break;
+
+                /* CONTEXT BUTTONS */
+                case MCU_BUTTON_EDIT:
+                    /* TOGGLE: Play ↔ Edit for current mode */
+                    if (g_ui_context == CTX_EDIT) {
+                        g_ui_context = CTX_PLAY;  /* Exit edit, return to play */
+                    } else {
+                        g_ui_context = CTX_EDIT;  /* Enter edit */
+                    }
+                    break;
+
+                case MCU_BUTTON_SYSTEM:
+                    /* TOGGLE: Play ↔ System (press again to exit) */
+                    if (g_ui_context == CTX_SYSTEM) {
+                        g_ui_context = CTX_PLAY;
+                    } else {
+                        g_ui_context = CTX_SYSTEM;
+                    }
+                    break;
+
+                case MCU_BUTTON_UTILITY:
+                    /* TOGGLE: Play ↔ Utility (press again to exit) */
+                    if (g_ui_context == CTX_UTILITY) {
+                        g_ui_context = CTX_PLAY;
+                    } else {
+                        g_ui_context = CTX_UTILITY;
+                    }
+                    break;
+
+                /* TONE SWITCH BUTTONS (3-6 per schematic) - only toggle in Patch/Play mode
+                 * These are physical buttons that have different functions per mode:
+                 * - Patch Play: Tone Switch 1-4 (mute individual tones)
+                 * - Perform: Part select
+                 * We only update g_tone_switch[] in Patch/Play mode.
+                 */
+                case MCU_BUTTON_TONE_SW1:  /* button 3 */
+                case MCU_BUTTON_TONE_SW2:  /* button 4 */
+                case MCU_BUTTON_TONE_SW3:  /* button 5 */
+                case MCU_BUTTON_TONE_SW4:  /* button 6 */
+                    if (g_ui_mode == MODE_PATCH && g_ui_context == CTX_PLAY) {
+                        int tone_idx = button - MCU_BUTTON_TONE_SW1;  /* 0-3 */
+                        g_tone_switch[tone_idx] = !g_tone_switch[tone_idx];
+                        fprintf(stderr, "JV880: Tone %d = %s\n", tone_idx + 1,
+                                g_tone_switch[tone_idx] ? "ON" : "OFF");
+                    }
+                    /* In other modes/contexts, button does something else (handled by MCU) */
+                    break;
+            }
+        }
+    } else if (strcmp(key, "button_release") == 0) {
+        /* Release MCU button */
+        int button = atoi(val);
+        if (g_mcu && button >= 0 && button < 32) {
+            g_mcu->mcu_button_pressed &= ~(1 << button);
+
+            /* Log state AFTER release (MCU has had time to process) */
+            FILE *logf = fopen("/data/UserData/jv880_debug.log", "a");
+            if (logf) {
+                const char* btn_names[] = {
+                    "CURSOR_L", "CURSOR_R", "TONE_SELECT", "MUTE",
+                    "TONE_SW1", "TONE_SW2", "TONE_SW3", "TONE_SW4",
+                    "UTILITY", "PREVIEW", "PATCH_PERF", "EDIT",
+                    "SYSTEM", "RHYTHM", "DATA_INC", "DATA_DEC"
+                };
+                const char* btn_name = (button < 16) ? btn_names[button] : "UNKNOWN";
+                fprintf(logf, "--- AFTER %s RELEASE ---\n", btn_name);
+                fprintf(logf, "LCD0: [%s]\n", g_mcu->lcd.GetLine(0));
+                fprintf(logf, "LCD1: [%s]\n", g_mcu->lcd.GetLine(1));
+                /* Dump more memory to find mode state */
+                fprintf(logf, "SRAM[0x00-0x3F]: ");
+                for (int i = 0; i < 64; i++) fprintf(logf, "%02X ", g_mcu->sram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "SRAM[0x40-0x7F]: ");
+                for (int i = 64; i < 128; i++) fprintf(logf, "%02X ", g_mcu->sram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "SRAM[0x80-0xBF]: ");
+                for (int i = 128; i < 192; i++) fprintf(logf, "%02X ", g_mcu->sram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "SRAM[0xC0-0xFF]: ");
+                for (int i = 192; i < 256; i++) fprintf(logf, "%02X ", g_mcu->sram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "RAM[0x00-0x3F]: ");
+                for (int i = 0; i < 64; i++) fprintf(logf, "%02X ", g_mcu->ram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "RAM[0x40-0x7F]: ");
+                for (int i = 64; i < 128; i++) fprintf(logf, "%02X ", g_mcu->ram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "RAM[0x80-0xBF]: ");
+                for (int i = 128; i < 192; i++) fprintf(logf, "%02X ", g_mcu->ram[i]);
+                fprintf(logf, "\n");
+                fprintf(logf, "RAM[0xC0-0xFF]: ");
+                for (int i = 192; i < 256; i++) fprintf(logf, "%02X ", g_mcu->ram[i]);
+                fprintf(logf, "\n\n");
+                fclose(logf);
+            }
+        }
+    } else if (strcmp(key, "tone_switch") == 0) {
+        /* Toggle tone switch 1-4 (patch mode only)
+         * val = "1", "2", "3", or "4" */
+        int tone = atoi(val);
+        if (tone >= 1 && tone <= 4) {
+            g_tone_switch[tone - 1] = !g_tone_switch[tone - 1];
+            /* Also send to MCU - press TONE_SELECT then the number */
+            if (g_mcu) {
+                /* The JV-880 uses TONE_SELECT button for this
+                 * For now just track state; MCU integration TBD */
+            }
+            fprintf(stderr, "JV880: Tone %d = %s\n", tone,
+                    g_tone_switch[tone - 1] ? "ON" : "OFF");
+        }
+    } else if (strcmp(key, "exit_context") == 0) {
+        /* Exit current context to play mode (for UI convenience) */
+        g_ui_context = CTX_PLAY;
+    } else if (strcmp(key, "next_expansion") == 0) {
+        /* Cycle to next expansion (or back to internal-only)
+         * g_current_expansion: -1 = internal only, 0+ = expansion index */
+        if (g_expansion_count > 0) {
+            g_current_expansion++;
+            if (g_current_expansion >= g_expansion_count) {
+                g_current_expansion = -1;  /* Wrap back to internal */
+            }
+            if (g_current_expansion < 0) {
+                fprintf(stderr, "JV880: Switched to internal patches only\n");
+            } else {
+                load_expansion_to_emulator(g_current_expansion);
+                fprintf(stderr, "JV880: Switched to expansion: %s\n",
+                        g_expansions[g_current_expansion].name);
+            }
+        }
     }
     /* Note: tempo and clock_mode are now host settings */
 }
@@ -1248,8 +1701,41 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         return 1;
     }
     if (strcmp(key, "patch_name") == 0 || strcmp(key, "preset_name") == 0) {
-        if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
+        /* In performance mode, return the performance name from LCD line 0
+         * which shows something like "PA:01 Perf Name" or "INT:01 Perf Name"
+         */
+        if (g_performance_mode && g_mcu) {
+            const char* lcd_line = g_mcu->lcd.GetLine(0);
+            /* Skip bank prefix (e.g., "PA:01 " or "INT:01 ") - find first space after colon */
+            const char* name_start = lcd_line;
+            const char* colon = strchr(lcd_line, ':');
+            if (colon) {
+                const char* space = strchr(colon, ' ');
+                if (space) {
+                    name_start = space + 1;
+                }
+            }
+            /* Trim trailing spaces */
+            int len = strlen(name_start);
+            while (len > 0 && name_start[len - 1] == ' ') len--;
+            if (len > 0 && len < buf_len) {
+                memcpy(buf, name_start, len);
+                buf[len] = '\0';
+            } else {
+                snprintf(buf, buf_len, "---");
+            }
+        } else if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
             snprintf(buf, buf_len, "%s", g_patches[g_current_patch].name);
+        } else {
+            snprintf(buf, buf_len, "---");
+        }
+        return 1;
+    }
+    if (strcmp(key, "performance_name") == 0) {
+        /* Get performance name from LCD line 0 */
+        if (g_mcu) {
+            const char* lcd_line = g_mcu->lcd.GetLine(0);
+            snprintf(buf, buf_len, "%s", lcd_line);
         } else {
             snprintf(buf, buf_len, "---");
         }
@@ -1299,6 +1785,129 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "8");
         return 1;
     }
+    if (strcmp(key, "perf_bank") == 0) {
+        snprintf(buf, buf_len, "%d", g_perf_bank);
+        return 1;
+    }
+    if (strcmp(key, "expansion_name") == 0) {
+        if (g_current_expansion >= 0 && g_current_expansion < g_expansion_count) {
+            snprintf(buf, buf_len, "%s", g_expansions[g_current_expansion].name);
+        } else {
+            snprintf(buf, buf_len, "Internal");
+        }
+        return 1;
+    }
+    if (strcmp(key, "expansion_count") == 0) {
+        snprintf(buf, buf_len, "%d", g_expansion_count);
+        return 1;
+    }
+    if (strcmp(key, "perf_bank_name") == 0) {
+        const char* names[] = { "Preset A", "Preset B", "Internal" };
+        snprintf(buf, buf_len, "%s", names[g_perf_bank % 3]);
+        return 1;
+    }
+    if (strcmp(key, "perfs_per_bank") == 0) {
+        snprintf(buf, buf_len, "%d", PERFS_PER_BANK);
+        return 1;
+    }
+    if (strcmp(key, "led_state") == 0) {
+        /* Return LED state as comma-separated values:
+         * edit,system,rhythm,utility,patch,unused,tone1,tone2,tone3,tone4
+         * Each is 0 or 1
+         *
+         * LED state decoded from P7DR matrix writes per switch board schematic:
+         * LED columns (from CN102): LED0=PATCH, LED1=EDIT, LED2=SYSTEM, LED3=RHYTHM, LED4=UTILITY
+         * - led_mode_state: single-bit value indicating which mode LED is ON
+         *   bit 0 (0x01)=PATCH, bit 1 (0x02)=EDIT, bit 2 (0x04)=SYSTEM, bit 3 (0x08)=RHYTHM, bit 4 (0x10)=UTILITY
+         * - led_tone_state: bit per tone (active LOW - bit=0 means ON)
+         *   LED0=TONE1, LED1=TONE2, LED2=TONE3, LED3=TONE4
+         */
+        int patch = 0, edit = 0, system = 0, rhythm = 0, utility = 0;
+        int tone1 = 0, tone2 = 0, tone3 = 0, tone4 = 0;
+
+        if (g_mcu) {
+            uint8_t mode_leds = g_mcu->led_mode_state;
+            uint8_t tone_leds = g_mcu->led_tone_state;
+            /* Decode mode LEDs - check individual bits (may be active LOW) */
+            patch   = (mode_leds & 0x01) ? 1 : 0;  /* LED0 */
+            edit    = (mode_leds & 0x02) ? 1 : 0;  /* LED1 */
+            system  = (mode_leds & 0x04) ? 1 : 0;  /* LED2 */
+            rhythm  = (mode_leds & 0x08) ? 1 : 0;  /* LED3 */
+            utility = (mode_leds & 0x10) ? 1 : 0;  /* LED4 */
+            /* Decode tone LEDs - active LOW, per schematic */
+            tone1   = ((tone_leds >> 0) & 1) == 0 ? 1 : 0;  /* LED0 */
+            tone2   = ((tone_leds >> 1) & 1) == 0 ? 1 : 0;  /* LED1 */
+            tone3   = ((tone_leds >> 2) & 1) == 0 ? 1 : 0;  /* LED2 */
+            tone4   = ((tone_leds >> 3) & 1) == 0 ? 1 : 0;  /* LED3 */
+        }
+
+        /* PATCH/PERFORM share LED0 - use g_performance_mode to distinguish
+         * Per JV-880 manual: LED lights when in PATCH mode */
+        int patch_led = patch && !g_performance_mode ? 1 : 0;
+
+        /* Step 5 is the PATCH/PERFORM LED - lights when in PATCH mode per JV-880 manual */
+        snprintf(buf, buf_len, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+                 edit, system, rhythm, utility,
+                 patch_led, 0,  /* Step 5 = PATCH/PERFORM LED (lit in PATCH mode), step 6 unused */
+                 tone1, tone2, tone3, tone4);
+        return 1;
+    }
+    if (strcmp(key, "led_debug") == 0) {
+        /* Debug: show LED state from P7DR matrix writes
+         * mode_state: bits for PATCH,EDIT,SYS,RHYTHM,UTIL (active LOW)
+         * tone_state: bits for TONE1-4 (active LOW)
+         * raw[0-1]: captured P7DR values for rows 0,1 */
+        if (g_mcu) {
+            snprintf(buf, buf_len, "mode=%02X tone=%02X raw=[%02X %02X]",
+                     g_mcu->led_mode_state, g_mcu->led_tone_state,
+                     g_mcu->led_state_raw[0], g_mcu->led_state_raw[1]);
+        } else {
+            snprintf(buf, buf_len, "no mcu");
+        }
+        return 1;
+    }
+    if (strcmp(key, "lcd_debug") == 0) {
+        /* Debug: return raw LCD content for troubleshooting */
+        if (g_mcu) {
+            const char* line0 = g_mcu->lcd.GetLine(0);
+            const char* line1 = g_mcu->lcd.GetLine(1);
+            uint8_t nvram_mode = g_mcu->nvram[NVRAM_MODE_OFFSET];
+            snprintf(buf, buf_len, "L0:[%s] L1:[%s] NV:%d", line0, line1, nvram_mode);
+        } else {
+            snprintf(buf, buf_len, "no mcu");
+        }
+        return 1;
+    }
+    if (strcmp(key, "nvram_dump") == 0) {
+        /* Debug: dump NVRAM bytes 0x00-0x3F to find mode/context state */
+        if (g_mcu) {
+            char *p = buf;
+            int remaining = buf_len;
+            for (int i = 0; i < 64 && remaining > 3; i++) {
+                int written = snprintf(p, remaining, "%02X ", g_mcu->nvram[i]);
+                p += written;
+                remaining -= written;
+            }
+        } else {
+            snprintf(buf, buf_len, "no mcu");
+        }
+        return 1;
+    }
+    if (strcmp(key, "ram_dump") == 0) {
+        /* Debug: dump RAM bytes 0x00-0x3F to find mode/context state */
+        if (g_mcu) {
+            char *p = buf;
+            int remaining = buf_len;
+            for (int i = 0; i < 64 && remaining > 3; i++) {
+                int written = snprintf(p, remaining, "%02X ", g_mcu->ram[i]);
+                p += written;
+                remaining -= written;
+            }
+        } else {
+            snprintf(buf, buf_len, "no mcu");
+        }
+        return 1;
+    }
     /* Note: tempo and clock_mode are now host settings */
     return 0;
 }
@@ -1311,6 +1920,10 @@ static void jv880_render_block(int16_t *out, int frames) {
         memset(out, 0, frames * 2 * sizeof(int16_t));
         return;
     }
+
+    /* Automated LED test disabled - was interfering with normal operation
+     * Can be triggered manually via set_param("led_test", "1") */
+    g_render_count++;
 
     pthread_mutex_lock(&g_ring_mutex);
     int avail = ring_available();

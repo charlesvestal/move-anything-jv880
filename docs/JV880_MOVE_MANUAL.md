@@ -1,171 +1,145 @@
 # JV-880 on Move (Module) Manual
 
-This module turns Move into a JV-880 front panel and editor. It does not do sequencing or clip playback.
+This module emulates a Roland JV-880 synthesizer with a direct LCD-native interface. Move controls map directly to JV-880 front panel buttons.
 
 ## Quick Start
 
-1) Launch Move Anything.
-2) Select the **JV-880** module.
-3) Play pads and turn encoders to shape the sound.
-
-## Surface Map (ASCII)
-
-Top row:
-  [D-PAD] [JOG] [MENU] [BACK] [SHIFT]
-
-Middle:
-  Encoders 1..8 (touch + turn)
-  Track buttons 1..4
-
-Bottom:
-  Steps 1..16
-  Pads 8x4 (always playable)
-
-## UI States
-
-- **Play** (default): performance control and patch/part selection.
-- **Edit** (MENU): full JV parameter pages.
-- **Utility** (SHIFT + MENU): system/utility access placeholder.
-
-Navigation:
-- **MENU** enters Edit (or loads a favorite if Favorites view is active).
-- **SHIFT + MENU** enters Utility.
-- **BACK** exits one level; hold BACK returns to Play.
+1. Launch Move Anything.
+2. Select the **JV-880** module.
+3. Play pads to trigger sounds.
+4. Use Jog wheel to change patches/parameters.
+5. Press MENU to toggle Patch/Performance mode.
 
 ## Display (4 Lines)
 
-1) **HUD Line 1**: activity (encoder changes, incoming MIDI, etc.).
-2) **HUD Line 2**: mode + patch name + tone/part + RX state.
-3) **Line 3**:
-   - Play: macro labels.
-   - Edit: JV LCD line 1.
-4) **Line 4**:
-   - Play: macro labels.
-   - Edit: JV LCD line 2.
-   - Temporary help replaces line 4 for ~2 seconds after state changes.
+```
+Line 1: Last pressed button (e.g., "Edit", "Data +")
+Line 2: Loaded expansion card (e.g., "Card: 01 Pop")
+Line 3: JV-880 LCD line 1 (inverted)
+Line 4: JV-880 LCD line 2 (inverted)
+```
 
-## Encoders (8)
+Lines 3-4 show the actual JV-880 LCD content, just like the hardware display.
 
-Play State (macros):
-1 Cutoff
-2 Resonance
-3 Attack
-4 Release
-5 LFO Rate
-6 LFO Depth
-7 FX Send
-8 Level
+## Control Mapping
 
-Edit/Utility State:
-- Encoders map to the current page parameters (8 per page).
-- Touch shows parameter info without changing value.
-- SHIFT + turn = fine adjust.
+Move controls map directly to JV-880 front panel buttons:
+
+| Move Control | JV-880 Function |
+|--------------|-----------------|
+| **Jog Wheel** | DATA dial (+/-) |
+| **Left** | CURSOR - |
+| **Right** | CURSOR + |
+| **Menu** | PATCH/PERFORM |
+| **SHIFT + Menu** | Cycle expansion cards |
+| **Capture** | TONE SELECT / PARAM SHIFT |
+
+## Step Buttons
+
+```
+Steps 1-4:   [EDIT] [SYSTEM] [RHYTHM] [UTILITY]
+Steps 5-8:   (unused)
+Steps 9-12:  [TONE 1] [TONE 2] [TONE 3] [TONE 4]
+Steps 13-16: (unused)
+```
+
+### Steps 1-4: Mode Buttons
+
+| Step | Function | LED |
+|------|----------|-----|
+| 1 | EDIT - Enter Patch/Performance Edit mode | Lit when in Edit mode |
+| 2 | SYSTEM - Enter System Edit mode | Lit when in System mode |
+| 3 | RHYTHM - Enter Rhythm Edit mode | Lit when in Rhythm mode |
+| 4 | UTILITY - Enter Utility mode | Lit when in Utility mode |
+
+### Steps 9-12: Tone Switch (Mode-Dependent)
+
+These buttons have different functions depending on the current mode:
+
+**Patch Mode:**
+| Step | Function |
+|------|----------|
+| 9 | Tone 1 |
+| 10 | Tone 2 |
+| 11 | Tone 3 |
+| 12 | Tone 4 |
+
+**Performance Mode:**
+| Step | Function |
+|------|----------|
+| 9 | MUTE |
+| 10 | MONITOR |
+| 11 | INFO |
+| 12 | Tone 4 |
+
+**Utility Mode:**
+| Step | Function |
+|------|----------|
+| 9 | Tone 1 |
+| 10 | Tone 2 |
+| 11 | COMPARE |
+| 12 | ENTER |
 
 ## Pads
 
-- Always play the engine (not repurposed for editing).
-- Velocity affects level; aftertouch follows JV modulation routing.
+- Always play the JV-880 sound engine.
+- Velocity affects note volume.
+- Aftertouch follows JV modulation routing.
 
-## Jog + D-pad
+## Expansion Cards
 
-Play State (Patch Mode):
-- **Left/Right/Jog**: patch change (cycles through 192 internal patches + expansions).
-- **SHIFT + Left/Right**: bank change (Preset A, Preset B, Internal, expansions).
+The JV-880 supports one expansion card slot. This module can load multiple SR-JV80 expansion ROMs, but only one is active at a time (like real hardware).
 
-Play State (Performance Mode):
-- **Left/Right/Jog**: performance change (cycles through 8 user performances).
-- **SHIFT + Left/Right**: no effect (performances have no banks).
+- **SHIFT + MENU** cycles through available expansion cards.
+- Current card is shown on Line 2 of the display.
+- "Internal" means no expansion card loaded.
+- Expansions cycle in alphabetical order.
 
-Edit/Utility State:
-- **Left/Right/Up/Down**: parameter selection.
-- **Jog**: value change.
+Place expansion ROM files in `roms/expansions/` with "SR-JV80" in the filename.
 
-## Patch Mode vs Performance Mode
+## LED Indicators
 
-The JV-880 has two operating modes, switched via Step 1 and Step 2:
+LEDs reflect the actual JV-880 state:
 
-**Patch Mode** (Step 1):
+| Control | LED Behavior |
+|---------|--------------|
+| Step 1 (Edit) | Lit when in Edit mode |
+| Step 2 (System) | Lit when in System mode |
+| Step 3 (Rhythm) | Lit when in Rhythm mode |
+| Step 4 (Utility) | Lit when in Utility mode |
+| Steps 9-12 | Lit based on tone state |
+| Menu | Lit when in Patch mode (per JV-880 manual) |
+
+## Patch vs Performance Mode
+
+Press **MENU** (PATCH/PERFORM) to toggle between modes:
+
+**Patch Mode** (Menu LED lit):
 - Single patch plays on MIDI channel 1.
-- 192 internal patches (Preset A, Preset B, Internal) plus expansions.
-- 4 tones per patch, each with independent sound parameters.
-- Ideal for: solo instruments, layered sounds, split keyboards.
+- 4 tones per patch, each with independent parameters.
+- Use DATA dial to select patches.
 
-**Performance Mode** (Step 2):
-- 8 parts, each on its own MIDI channel (1–8), with Part 8 as Rhythm.
-- 8 user performances stored in NVRAM.
-- Each part references a patch and has level/pan/key range settings.
-- Ideal for: multitimbral setups, layered orchestrations, backing tracks.
+**Performance Mode** (Menu LED off):
+- 8 parts, each on its own MIDI channel.
+- Part 8 is the Rhythm part.
+- Use DATA dial to select performances.
 
-## Track Buttons (4)
+## Navigation Tips
 
-Patch Mode:
-- Track 1–4 selects Tone 1–4.
-- SHIFT + Track toggles tone mute.
+The JV-880 interface uses CURSOR and DATA for navigation:
 
-Performance Mode:
-- Track 1–4 selects Part 1–4 (or 5–8 with Step 6).
-- SHIFT + Track toggles part mute.
-- Step 6 toggles between Parts 1–4 and Parts 5–8.
-- Part 8 is the Rhythm part (drums).
+- **CURSOR +/-** (Left/Right): Move between parameters or menu items.
+- **DATA +/-** (Jog wheel): Change values or select patches.
+- **EDIT**: Enter edit mode for current patch/performance.
+- **TONE SELECT** (Capture) + **TONE SWITCH**: Select tone to edit.
 
-## Step Buttons (16)
+## ROM Requirements
 
-Play State shortcuts:
-1. **Patch Mode** - single patch, 4 tones (LED lit when active)
-2. **Performance Mode** - 8 parts, multitimbral (LED lit when active)
-3. Rhythm Focus
-4. FX page
-5. Favorites view (toggle)
-6. Part Bank toggle (Parts 1–4 ↔ 5–8, LED lit for 5–8)
-7. Octave -
-8. Octave +
-9. Transpose -
-10. Transpose +
-11. Velocity Mode (HUD only)
-12. MIDI Monitor toggle (HUD only)
-13. Output/FX page
-14. Local Control toggle (HUD only)
-15. SysEx RX/Thru toggle (HUD only)
-16. Utility shortcut
+Place these files in the `roms/` folder:
+- `jv880_rom1.bin` (required)
+- `jv880_rom2.bin` (required)
+- `jv880_waverom1.bin` (required)
+- `jv880_waverom2.bin` (required)
+- `jv880_nvram.bin` (optional - saves settings)
 
-Edit State tabs:
-1. HOME
-2. COMMON
-3. TONE/WG
-4. PITCH
-5. TVF
-6. TVA
-7. LFO (SHIFT + this tab toggles LFO1/2)
-8. OUT/FX
-9. MOD
-10. CTRL
-11. STRUCT (Not used)
-12. MIX
-13. PART
-14. RHYTHM
-15. FX
-16. UTIL
-
-## Transport / Utility Buttons
-
-- PLAY: audition latch (HUD only for now).
-- REC (seq): MIDI monitor toggle (HUD only).
-- LOOP: sustain latch (on/off).
-- CAPTURE: compare (HUD only).
-- REC (audio): Panic / All Notes Off.
-- SHIFT + REC (audio): Reset controllers.
-- MUTE: mute selected tone/part.
-- COPY: copy (HUD only).
-- DELETE: init/clear confirm (MENU = confirm, BACK = cancel).
-- UNDO: undo (HUD only); SHIFT + UNDO: redo (HUD only).
-
-## Favorites
-
-- Step 5 toggles Favorites view.
-- SHIFT + Step 5 adds/removes current patch to favorites.
-- In Favorites view:
-  - Jog or Left/Right selects.
-  - MENU loads selection.
-  - BACK exits.
-
-Favorites save to `favorites.json` in the module folder.
+**Note:** ROMs must be version 1.0.0. Version 1.0.1 causes CPU traps.

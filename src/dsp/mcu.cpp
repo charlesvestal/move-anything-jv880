@@ -58,6 +58,54 @@ void MCU::MCU_AnalogSample(const int channel) {
 
 void MCU::MCU_DeviceWrite(uint32_t address, const uint8_t data) {
   address &= 0x7f;
+
+  /* Capture P7DR writes for LED state decoding
+   * Based on JV-880 switch board schematic:
+   * - io_sd=0xFE (bit 0 low) = row 0 (LC0) = Mode LEDs: PATCH,EDIT,SYS,RHYTHM,UTIL
+   * - io_sd=0xFD (bit 1 low) = row 1 (LC1) = Tone LEDs: TONE1-4
+   * - P7DR bits 0-4 drive LED columns via CN102 (LED0-LED4)
+   * - Firmware strobes LEDs: single-bit patterns (01,02,04,08,10) indicate which LED is on
+   * - Active HIGH for strobing: bit=1 means that LED is being illuminated
+   *
+   * Scan values (FF, DF, 00) are matrix scanning noise - filter them out.
+   */
+  if (address == DEV_P7DR) {
+    uint8_t ddr = dev_register[DEV_P7DDR];
+    /* Only capture when DDR is in output mode (bits 0-5 set) */
+    if ((ddr & 0x3F) == 0x3F) {
+      /* Filter out scan noise values - real LED values are different */
+      bool is_scan_value = (data == 0xFF || data == 0xDF || data == 0x00);
+
+      if (io_sd == 0xFE) {
+        /* Row 0 = Mode LEDs
+         * The firmware strobes through all LED positions (01,02,04,08,10)
+         * Track which single-bit values we see to build up the LED state */
+        led_state_raw[0] = data;
+        if (!is_scan_value && (data & 0x1F) != 0) {
+          /* Only update if it's a valid single-bit LED pattern */
+          if ((data & (data - 1)) == 0) {
+            /* Single bit set - this is a mode LED being strobed */
+            led_mode_state = data;
+          }
+        }
+      } else if (io_sd == 0xFD) {
+        /* Row 1 = Tone LEDs - multi-bit value */
+        led_state_raw[1] = data;
+        if (!is_scan_value) {
+          led_tone_state = data;
+        }
+      }
+    }
+  }
+
+  /* Log device register writes for LED reverse engineering - only log CHANGES */
+  if (led_log_enabled && led_log && address < 0x80) {
+    if (led_log_last_dev[address] != data) {
+      fprintf(led_log, "DEV 0x%02X: 0x%02X -> 0x%02X\n", address, led_log_last_dev[address], data);
+      led_log_last_dev[address] = data;
+    }
+  }
+
   if (address >= 0x10 && address < 0x40) {
     TIMER_Write(address, data);
     return;
@@ -195,15 +243,19 @@ uint8_t MCU::MCU_DeviceRead(uint32_t address) {
   case 0x00:
     return 0xff;
   case DEV_P7DR: {
+    /* JV-880 button matrix: 4x3 (12 buttons) per switch board schematic
+     * Row 0 (0xFB): buttons 0-3 (CURSOR_L, CURSOR_R, TONE_SELECT, TONE1)
+     * Row 1 (0xF7): buttons 4-7 (TONE2, TONE3, TONE4, UTILITY)
+     * Row 2 (0xEF): buttons 8-11 (PATCH_PERFORM, EDIT, SYSTEM, RHYTHM) */
     uint8_t data = 0xff;
     uint32_t button_pressed = mcu_button_pressed;
 
-    if (io_sd == 0b11111011)
-      data &= ((button_pressed >> 0) & 0b11111) ^ 0xFF;
-    if (io_sd == 0b11110111)
-      data &= ((button_pressed >> 5) & 0b11111) ^ 0xFF;
-    if (io_sd == 0b11101111)
-      data &= ((button_pressed >> 10) & 0b1111) ^ 0xFF;
+    if (io_sd == 0b11111011)      /* 0xFB - row 0 */
+      data &= ((button_pressed >> 0) & 0b1111) ^ 0xFF;
+    if (io_sd == 0b11110111)      /* 0xF7 - row 1 */
+      data &= ((button_pressed >> 4) & 0b1111) ^ 0xFF;
+    if (io_sd == 0b11101111)      /* 0xEF - row 2 */
+      data &= ((button_pressed >> 8) & 0b1111) ^ 0xFF;
 
     data |= 0b10000000;
     return data;
@@ -340,6 +392,11 @@ void MCU::MCU_Write(uint32_t address, const uint8_t value) {
     else if (address < 0xe000)
       sram[address & 0x7fff] = value;
     else if (address >= 0xf400 && address < 0xf800) {
+      /* Log writes that aren't LCD data or frequent io_sd updates */
+      if (address != 0xf401 && address != 0xf404 && address != 0xf405) {
+        fprintf(stderr, "JV880: IO W 0x%04X = 0x%02X\n", address, value);
+      }
+
       if (address == 0xf404 || address == 0xf405)
         lcd.LCD_Write(address & 1, value);
       else if (address == 0xf401) {
@@ -347,6 +404,7 @@ void MCU::MCU_Write(uint32_t address, const uint8_t value) {
         lcd.LCD_Enable((value & 1) == 0);
       } else if (address == 0xf402)
         ga_int_enable = (value << 1);
+      /* 0xf400 and 0xf403 are general IO registers, not direct LED control */
     } else if (address >= 0xf100 && address < 0xf110) {
       // JV-880 alternate LCD addresses
       if (address == 0xf105)

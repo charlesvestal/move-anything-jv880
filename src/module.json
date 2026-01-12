@@ -7,8 +7,8 @@
   "ui": "ui.js",
   "dsp": "dsp.so",
   "api_version": 1,
-  "raw_ui": true,
   "capabilities": {
+    "raw_midi": true,
     "audio_out": true,
     "audio_in": false,
     "midi_in": true,
