@@ -243,19 +243,19 @@ uint8_t MCU::MCU_DeviceRead(uint32_t address) {
   case 0x00:
     return 0xff;
   case DEV_P7DR: {
-    /* JV-880 button matrix: 4x3 (12 buttons) per switch board schematic
-     * Row 0 (0xFB): buttons 0-3 (CURSOR_L, CURSOR_R, TONE_SELECT, TONE1)
-     * Row 1 (0xF7): buttons 4-7 (TONE2, TONE3, TONE4, UTILITY)
-     * Row 2 (0xEF): buttons 8-11 (PATCH_PERFORM, EDIT, SYSTEM, RHYTHM) */
+    /* JV-880 button matrix: 5+5+4 (14 buttons) per Nuked-SC55
+     * Row 0 (0xFB): buttons 0-4 (5 buttons)
+     * Row 1 (0xF7): buttons 5-9 (5 buttons)
+     * Row 2 (0xEF): buttons 10-13 (4 buttons, includes DATA push and ENTER) */
     uint8_t data = 0xff;
     uint32_t button_pressed = mcu_button_pressed;
 
-    if (io_sd == 0b11111011)      /* 0xFB - row 0 */
-      data &= ((button_pressed >> 0) & 0b1111) ^ 0xFF;
-    if (io_sd == 0b11110111)      /* 0xF7 - row 1 */
-      data &= ((button_pressed >> 4) & 0b1111) ^ 0xFF;
-    if (io_sd == 0b11101111)      /* 0xEF - row 2 */
-      data &= ((button_pressed >> 8) & 0b1111) ^ 0xFF;
+    if (io_sd == 0b11111011)      /* 0xFB - row 0: buttons 0-4 */
+      data &= ((button_pressed >> 0) & 0b11111) ^ 0xFF;
+    if (io_sd == 0b11110111)      /* 0xF7 - row 1: buttons 5-9 */
+      data &= ((button_pressed >> 5) & 0b11111) ^ 0xFF;
+    if (io_sd == 0b11101111)      /* 0xEF - row 2: buttons 10-13 */
+      data &= ((button_pressed >> 10) & 0b1111) ^ 0xFF;
 
     data |= 0b10000000;
     return data;
@@ -367,6 +367,15 @@ uint8_t MCU::MCU_Read(uint32_t address) {
   case 14:
   case 15:
     ret = cardram[address & 0x7fff];
+    /* Debug: log first 100 cardram reads to see what firmware checks */
+    {
+      static int cardram_read_count = 0;
+      if (cardram_read_count < 100) {
+        fprintf(stderr, "CARDRAM READ[%d]: page=%d addr=0x%04X -> 0x%02X\n",
+                cardram_read_count, page, address & 0x7fff, ret);
+        cardram_read_count++;
+      }
+    }
     break;
   case 10:
   case 11:

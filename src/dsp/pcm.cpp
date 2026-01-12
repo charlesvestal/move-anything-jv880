@@ -83,6 +83,16 @@ void Pcm::PCM_Write(uint32_t address, uint8_t data)
                 pcm.wave_read_address &= ~0xff;
                 pcm.wave_read_address |= (data & 0xff) << 0;
                 pcm.wave_byte_latch = PCM_ReadROM(pcm.wave_read_address);
+                /* Debug: log reads from expansion ROM banks (banks 2-6) */
+                {
+                    static int exp_read_count = 0;
+                    int bank = (pcm.wave_read_address >> 21) & 7;
+                    if (bank >= 2 && exp_read_count < 200) {
+                        fprintf(stderr, "PCM_ROM READ[%d]: addr=0x%06X bank=%d -> 0x%02X\n",
+                                exp_read_count, pcm.wave_read_address, bank, pcm.wave_byte_latch);
+                        exp_read_count++;
+                    }
+                }
                 break;
         }
     }

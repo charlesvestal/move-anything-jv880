@@ -9,6 +9,7 @@ import * as std from 'std';
 
 import {
     MoveMainKnob,
+    MoveMainButton,
     MoveLeft, MoveRight,
     MoveUp, MoveDown,
     MoveShift, MoveMenu, MoveBack,
@@ -132,22 +133,30 @@ const FONT_4X6 = [
     [0x03, 0x60, 0x00], /* 126 ~ */
 ];
 
-/* JV-880 MCU button constants (from mcu.h) */
+/* JV-880 MCU button constants (from mcu.h) - 5+5+4 layout per Nuked-SC55 */
 const MCU_BUTTON_CURSOR_L = 0;
 const MCU_BUTTON_CURSOR_R = 1;
 const MCU_BUTTON_TONE_SELECT = 2;
-const MCU_BUTTON_TONE_SW1 = 3;
-const MCU_BUTTON_TONE_SW2 = 4;
-const MCU_BUTTON_TONE_SW3 = 5;
-const MCU_BUTTON_TONE_SW4 = 6;
-const MCU_BUTTON_UTILITY = 7;
-const MCU_BUTTON_PATCH_PERFORM = 8;
-const MCU_BUTTON_EDIT = 9;
-const MCU_BUTTON_SYSTEM = 10;
-const MCU_BUTTON_RHYTHM = 11;
+const MCU_BUTTON_MUTE = 3;        /* Also TONE1 */
+const MCU_BUTTON_DATA = 4;        /* DATA encoder push */
+const MCU_BUTTON_MONITOR = 5;     /* Also TONE2 */
+const MCU_BUTTON_COMPARE = 6;     /* Also TONE3 */
+const MCU_BUTTON_ENTER = 7;       /* Also TONE4 */
+const MCU_BUTTON_UTILITY = 8;
+const MCU_BUTTON_PREVIEW = 9;
+const MCU_BUTTON_PATCH_PERFORM = 10;
+const MCU_BUTTON_EDIT = 11;
+const MCU_BUTTON_SYSTEM = 12;
+const MCU_BUTTON_RHYTHM = 13;
+/* Tone switch aliases */
+const MCU_BUTTON_TONE_SW1 = MCU_BUTTON_MUTE;
+const MCU_BUTTON_TONE_SW2 = MCU_BUTTON_MONITOR;
+const MCU_BUTTON_TONE_SW3 = MCU_BUTTON_COMPARE;
+const MCU_BUTTON_TONE_SW4 = MCU_BUTTON_ENTER;
 
 /* Move control mappings */
 const CC_JOG = MoveMainKnob;
+const CC_JOG_BUTTON = MoveMainButton;  /* Jog wheel click */
 const CC_LEFT = MoveLeft;
 const CC_RIGHT = MoveRight;
 const CC_SHIFT = MoveShift;
@@ -414,6 +423,12 @@ function handleCC(cc, value) {
 
     if (cc === CC_JOG) {
         return handleJog(value);
+    }
+
+    /* Jog wheel click - DATA encoder push */
+    if (cc === CC_JOG_BUTTON && value > 0) {
+        tapButton(MCU_BUTTON_DATA, 'Data Push');
+        return true;
     }
 
     return false;

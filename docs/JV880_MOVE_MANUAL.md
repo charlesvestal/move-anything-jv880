@@ -30,6 +30,7 @@ Move controls map directly to JV-880 front panel buttons:
 | Move Control | JV-880 Function |
 |--------------|-----------------|
 | **Jog Wheel** | DATA dial (+/-) |
+| **Jog Wheel Click** | DATA push |
 | **Left** | CURSOR - |
 | **Right** | CURSOR + |
 | **Menu** | PATCH/PERFORM |
