@@ -237,8 +237,9 @@ function syncStepLeds() {
     setStepLed(MoveStep12, leds[6] ? LedOff : LedOn);  /* Tone 4 */
 
     /* Menu LED: bright in Patch mode, dim in Performance mode */
+    const perfMode = host_module_get_param('performance_mode') || '0';
     const inPatchMode = perfMode === '0';
-    setLed(MoveMenu, inPatchMode ? WhiteLedBright : 0x20);
+    setLed(MoveMenu, inPatchMode ? WhiteLedBright : 0x10);
 }
 
 /* === Utility === */
