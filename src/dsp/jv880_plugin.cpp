@@ -78,9 +78,12 @@ static int g_current_patch = 0;
 
 /* Performance mode support */
 static int g_performance_mode = 0;  /* 0 = patch mode, 1 = performance mode */
-static int g_current_performance = 0;  /* 0-7 for user performances */
+static int g_current_performance = 0;  /* 0-47 for all performances (3 banks x 16) */
 static int g_current_part = 0;  /* 0-7 for parts within performance */
-#define NUM_PERFORMANCES 8
+static int g_perf_bank = 0;  /* 0=Preset A, 1=Preset B, 2=Internal */
+#define NUM_PERF_BANKS 3
+#define PERFS_PER_BANK 16
+#define NUM_PERFORMANCES (NUM_PERF_BANKS * PERFS_PER_BANK)  /* 48 total */
 #define PERF_NAME_LEN 12
 
 /* Bank navigation */
@@ -758,44 +761,69 @@ static void select_patch(int global_index) {
     fprintf(stderr, "JV880: Selected patch %d: %s\n", global_index, p->name);
 }
 
-/* Switch between patch and performance mode */
+/* Switch between patch and performance mode
+ * Sets NVRAM mode flag and simulates PATCH/PERFORM button press
+ */
 static void set_mode(int performance_mode) {
     if (!g_mcu) return;
 
-    g_performance_mode = performance_mode ? 1 : 0;
+    int new_mode = performance_mode ? 1 : 0;
+
+    /* Only switch if mode is actually changing */
+    if (g_performance_mode == new_mode) return;
+
+    g_performance_mode = new_mode;
 
     /* Set mode in NVRAM: 0 = performance, 1 = patch */
     g_mcu->nvram[NVRAM_MODE_OFFSET] = g_performance_mode ? 0 : 1;
 
-    /* Send program change to trigger mode switch in emulator */
-    uint8_t pc_msg[2] = { 0xC0, 0x00 };
-    int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
-    if (next != g_midi_read) {
-        memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
-        g_midi_queue_len[g_midi_write] = 2;
-        g_midi_write = next;
-    }
+    /* Simulate pressing PATCH/PERFORM button to trigger mode switch in emulator */
+    g_mcu->mcu_button_pressed |= (1 << MCU_BUTTON_PATCH_PERFORM);
 
-    fprintf(stderr, "JV880: Switched to %s mode\n",
-            g_performance_mode ? "Performance" : "Patch");
+    fprintf(stderr, "JV880: Switched to %s mode (NVRAM[0x11]=0x%02x, button pressed)\n",
+            g_performance_mode ? "Performance" : "Patch",
+            g_mcu->nvram[NVRAM_MODE_OFFSET]);
 }
 
-/* Select a performance (0-7) */
+/* Select a performance (0-47 across 3 banks) */
 static void select_performance(int perf_index) {
     if (!g_mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
 
     g_current_performance = perf_index;
+    g_perf_bank = perf_index / PERFS_PER_BANK;
+    int perf_in_bank = perf_index % PERFS_PER_BANK;
 
     /* Ensure we're in performance mode */
     if (!g_performance_mode) {
         set_mode(1);
     }
 
-    /* Send bank select + program change to select performance */
-    /* Bank 0 = User performances 1-8 */
-    uint8_t bank_msg[3] = { 0xB0, 0x00, 0x00 };  /* Bank MSB = 0 */
-    uint8_t pc_msg[2] = { 0xC0, (uint8_t)perf_index };
+    /* Calculate bank select and program change values per JV-880 MIDI spec */
+    uint8_t bank_msb;
+    uint8_t pc_value;
 
+    switch (g_perf_bank) {
+        case 0:  /* Preset A */
+            bank_msb = 81;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+        case 1:  /* Preset B */
+            bank_msb = 81;
+            pc_value = 64 + perf_in_bank;  /* 64-79 */
+            break;
+        case 2:  /* Internal */
+        default:
+            bank_msb = 80;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+    }
+
+    /* Send on Control Channel (channel 16 = 0x0F, so status bytes are 0xBF/0xCF) */
+    uint8_t ctrl_ch = 0x0F;  /* Channel 16 (0-indexed) */
+    uint8_t bank_msg[3] = { (uint8_t)(0xB0 | ctrl_ch), 0x00, bank_msb };
+    uint8_t pc_msg[2] = { (uint8_t)(0xC0 | ctrl_ch), pc_value };
+
+    /* Queue Bank Select (CC#0) */
     int next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
     if (next != g_midi_read) {
         memcpy(g_midi_queue[g_midi_write], bank_msg, 3);
@@ -803,6 +831,7 @@ static void select_performance(int perf_index) {
         g_midi_write = next;
     }
 
+    /* Queue Program Change */
     next = (g_midi_write + 1) % MIDI_QUEUE_SIZE;
     if (next != g_midi_read) {
         memcpy(g_midi_queue[g_midi_write], pc_msg, 2);
@@ -810,7 +839,9 @@ static void select_performance(int perf_index) {
         g_midi_write = next;
     }
 
-    fprintf(stderr, "JV880: Selected performance %d\n", perf_index + 1);
+    const char* bank_names[] = { "Preset A", "Preset B", "Internal" };
+    fprintf(stderr, "JV880: Selected %s performance %d (ch16: Bank=%d PC=%d)\n",
+            bank_names[g_perf_bank], perf_in_bank + 1, bank_msb, pc_value);
 }
 
 /* Select a part within the current performance (0-7) */
@@ -1248,7 +1279,30 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         return 1;
     }
     if (strcmp(key, "patch_name") == 0 || strcmp(key, "preset_name") == 0) {
-        if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
+        /* In performance mode, return the performance name from LCD line 0
+         * which shows something like "PA:01 Perf Name" or "INT:01 Perf Name"
+         */
+        if (g_performance_mode && g_mcu) {
+            const char* lcd_line = g_mcu->lcd.GetLine(0);
+            /* Skip bank prefix (e.g., "PA:01 " or "INT:01 ") - find first space after colon */
+            const char* name_start = lcd_line;
+            const char* colon = strchr(lcd_line, ':');
+            if (colon) {
+                const char* space = strchr(colon, ' ');
+                if (space) {
+                    name_start = space + 1;
+                }
+            }
+            /* Trim trailing spaces */
+            int len = strlen(name_start);
+            while (len > 0 && name_start[len - 1] == ' ') len--;
+            if (len > 0 && len < buf_len) {
+                memcpy(buf, name_start, len);
+                buf[len] = '\0';
+            } else {
+                snprintf(buf, buf_len, "---");
+            }
+        } else if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
             snprintf(buf, buf_len, "%s", g_patches[g_current_patch].name);
         } else {
             snprintf(buf, buf_len, "---");
