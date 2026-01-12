@@ -1692,6 +1692,14 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "%s", g_mcu->lcd.GetLine(1));
         return 1;
     }
+    if (strcmp(key, "lcd_cursor") == 0 && g_mcu) {
+        /* Returns "visible,row,col" e.g. "1,0,5" for cursor on row 0, col 5 */
+        int visible = g_mcu->lcd.IsCursorVisible() ? 1 : 0;
+        int row = g_mcu->lcd.GetCursorRow();
+        int col = g_mcu->lcd.GetCursorCol();
+        snprintf(buf, buf_len, "%d,%d,%d", visible, row, col);
+        return 1;
+    }
     if (strcmp(key, "total_patches") == 0) {
         snprintf(buf, buf_len, "%d", g_total_patches);
         return 1;
