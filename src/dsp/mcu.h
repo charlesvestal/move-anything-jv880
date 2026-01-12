@@ -220,21 +220,28 @@ struct mcu_t {
 };
 
 enum {
-  // JV880
+  /* JV-880 button matrix from switch board schematic (4x3 matrix, 12 buttons)
+   * Row 0 (io_sd bit 2 low = 0xFB): buttons 0-3
+   * Row 1 (io_sd bit 3 low = 0xF7): buttons 4-7
+   * Row 2 (io_sd bit 4 low = 0xEF): buttons 8-11 */
+
+  /* Row 0: CURSOR<, CURSOR>, TONE SELECT, TONE1 */
   MCU_BUTTON_CURSOR_L = 0,
   MCU_BUTTON_CURSOR_R = 1,
   MCU_BUTTON_TONE_SELECT = 2,
-  MCU_BUTTON_MUTE = 3,
-  MCU_BUTTON_DATA = 4,
-  MCU_BUTTON_MONITOR = 5,
-  MCU_BUTTON_COMPARE = 6,
-  MCU_BUTTON_ENTER = 7,
-  MCU_BUTTON_UTILITY = 8,
-  MCU_BUTTON_PREVIEW = 9,
-  MCU_BUTTON_PATCH_PERFORM = 10,
-  MCU_BUTTON_EDIT = 11,
-  MCU_BUTTON_SYSTEM = 12,
-  MCU_BUTTON_RHYTHM = 13,
+  MCU_BUTTON_TONE_SW1 = 3,
+
+  /* Row 1: TONE2, TONE3, TONE4, UTILITY */
+  MCU_BUTTON_TONE_SW2 = 4,
+  MCU_BUTTON_TONE_SW3 = 5,
+  MCU_BUTTON_TONE_SW4 = 6,
+  MCU_BUTTON_UTILITY = 7,
+
+  /* Row 2: PATCH/PERFORM, EDIT, SYSTEM, RHYTHM */
+  MCU_BUTTON_PATCH_PERFORM = 8,
+  MCU_BUTTON_EDIT = 9,
+  MCU_BUTTON_SYSTEM = 10,
+  MCU_BUTTON_RHYTHM = 11,
 };
 
 constexpr uint32_t ANALOG_LEVEL_BATTERY = 0x2a0;
@@ -272,6 +279,29 @@ struct MCU {
   uint8_t dev_register[0x80] = {0};
 
   uint8_t io_sd = 0x00;
+
+  /* LED state - decoded from P7DR matrix writes (based on switch board schematic)
+   * Row 0 (io_sd=0xFE / LC0): Mode LEDs - bits 0-4
+   *   Bit 0: PATCH/PERFORM LED
+   *   Bit 1: EDIT LED
+   *   Bit 2: SYSTEM LED
+   *   Bit 3: RHYTHM LED
+   *   Bit 4: UTILITY LED
+   * Row 1 (io_sd=0xFD / LC1): Tone LEDs - bits 0-3
+   *   Bit 0: TONE1 LED
+   *   Bit 1: TONE2 LED
+   *   Bit 2: TONE3 LED
+   *   Bit 3: TONE4 LED
+   * LEDs are active LOW (bit=0 means LED ON)
+   */
+  uint8_t led_mode_state = 0x01;    /* Mode LEDs (row 0): default PATCH (0x01 per schematic) */
+  uint8_t led_tone_state = 0x00;    /* Tone LEDs (row 1): default all ON (active low) */
+  uint8_t led_state_raw[8] = {0};   /* P7DR values for each io_sd row (debug) */
+
+  /* Debug logging for reverse engineering LED control */
+  FILE* led_log = nullptr;
+  bool led_log_enabled = false;
+  uint8_t led_log_last_dev[0x80] = {0};  /* Track last values to only log changes */
 
   int adf_rd = 0;
   uint64_t analog_end_time = 0;
