@@ -2,6 +2,8 @@
 
 This module emulates a Roland JV-880 synthesizer with a direct LCD-native interface. Move controls map directly to JV-880 front panel buttons.
 
+For full JV-880 operation details, see the [Roland JV-880 Owner's Manual (PDF)](https://cdn.roland.com/assets/media/pdf/JV-880_OM.pdf).
+
 ## Quick Start
 
 1. Launch Move Anything.
@@ -103,26 +105,28 @@ LEDs reflect the actual JV-880 state:
 
 | Control | LED Behavior |
 |---------|--------------|
-| Step 1 (Edit) | Lit when in Edit mode |
-| Step 2 (System) | Lit when in System mode |
-| Step 3 (Rhythm) | Lit when in Rhythm mode |
-| Step 4 (Utility) | Lit when in Utility mode |
-| Steps 9-12 | Lit based on tone state |
-| Menu | Lit when in Patch mode (per JV-880 manual) |
+| Step 1 (Edit) | Orange when in Edit mode |
+| Step 2 (System) | Orange when in System mode |
+| Step 3 (Rhythm) | Orange when in Rhythm mode |
+| Step 4 (Utility) | Orange when in Utility mode |
+| Steps 9-12 (Tones) | **White** = tone active (playing), **Orange** = tone muted |
+| Menu | Bright when in Patch mode, dim when in Performance mode |
 
 ## Patch vs Performance Mode
 
 Press **MENU** (PATCH/PERFORM) to toggle between modes:
 
-**Patch Mode** (Menu LED lit):
+**Patch Mode** (Menu LED bright):
 - Single patch plays on MIDI channel 1.
 - 4 tones per patch, each with independent parameters.
 - Use DATA dial to select patches.
+- Steps 9-12 toggle individual tones on/off.
 
-**Performance Mode** (Menu LED off):
+**Performance Mode** (Menu LED dim):
 - 8 parts, each on its own MIDI channel.
 - Part 8 is the Rhythm part.
 - Use DATA dial to select performances.
+- Steps 9-12 have different functions (see above).
 
 ## Navigation Tips
 
