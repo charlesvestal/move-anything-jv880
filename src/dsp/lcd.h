@@ -136,4 +136,20 @@ struct LCD {
         line_buf[LCD_COLS] = '\0';
         return line_buf;
     }
+
+    /* Get cursor visibility (LCD_C flag) */
+    bool IsCursorVisible() const {
+        return LCD_C != 0;
+    }
+
+    /* Get cursor row (0 or 1) */
+    int GetCursorRow() const {
+        return (LCD_DD_RAM & 0x40) ? 1 : 0;
+    }
+
+    /* Get cursor column (0-23) */
+    int GetCursorCol() const {
+        int col = LCD_DD_RAM & 0x3F;
+        return (col < LCD_COLS) ? col : -1;
+    }
 };
