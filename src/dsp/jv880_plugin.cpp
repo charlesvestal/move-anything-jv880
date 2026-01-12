@@ -1334,6 +1334,17 @@ static void *load_thread_func(void *arg) {
     }
     fprintf(stderr, "JV880: Warmup done\n");
 
+    /* Sync g_tone_switch from MCU LED state (active LOW: bit=0 means ON) */
+    if (g_mcu) {
+        uint8_t tone_leds = g_mcu->led_tone_state;
+        g_tone_switch[0] = ((tone_leds >> 0) & 1) == 0 ? 1 : 0;
+        g_tone_switch[1] = ((tone_leds >> 1) & 1) == 0 ? 1 : 0;
+        g_tone_switch[2] = ((tone_leds >> 2) & 1) == 0 ? 1 : 0;
+        g_tone_switch[3] = ((tone_leds >> 3) & 1) == 0 ? 1 : 0;
+        fprintf(stderr, "JV880: Tone switch synced from LED state: %d%d%d%d\n",
+                g_tone_switch[0], g_tone_switch[1], g_tone_switch[2], g_tone_switch[3]);
+    }
+
     /* Pre-fill audio buffer */
     g_ring_write = 0;
     g_ring_read = 0;
@@ -1872,6 +1883,12 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         } else {
             snprintf(buf, buf_len, "no mcu");
         }
+        return 1;
+    }
+    if (strcmp(key, "tone_sw_state") == 0) {
+        /* Debug: show plugin's g_tone_switch state (1=ON, 0=OFF for each tone) */
+        snprintf(buf, buf_len, "%d%d%d%d",
+                 g_tone_switch[0], g_tone_switch[1], g_tone_switch[2], g_tone_switch[3]);
         return 1;
     }
     if (strcmp(key, "lcd_debug") == 0) {

@@ -218,6 +218,8 @@ function syncStepLeds() {
     lastLedState = ledState;
     const leds = ledState.split(',').map(v => parseInt(v));
 
+    needsRedraw = true;
+
     /* Corrected mapping based on testing:
      * Step 1 (Edit) = 0x08 = leds[2] (DSP "rhythm")
      * Step 2 (System) = 0x04 = leds[1] (DSP "system")
@@ -228,16 +230,15 @@ function syncStepLeds() {
     setStepLed(MoveStep3, leds[0] ? LedOn : LedOff);  /* Rhythm */
     setStepLed(MoveStep4, leds[4] ? LedOn : LedOff);  /* Utility */
 
-    /* Tones: reversed mapping (both buttons and LEDs reversed together) */
-    setStepLed(MoveStep9, leds[9] ? LedOn : LedOff);   /* Tone 1 */
-    setStepLed(MoveStep10, leds[8] ? LedOn : LedOff);  /* Tone 2 */
-    setStepLed(MoveStep11, leds[7] ? LedOn : LedOff);  /* Tone 3 */
-    setStepLed(MoveStep12, leds[6] ? LedOn : LedOff);  /* Tone 4 */
+    /* Tones: reversed LED mapping, inverted colors (1=active=white, 0=muted=orange) */
+    setStepLed(MoveStep9, leds[9] ? LedOff : LedOn);   /* Tone 1 */
+    setStepLed(MoveStep10, leds[8] ? LedOff : LedOn);  /* Tone 2 */
+    setStepLed(MoveStep11, leds[7] ? LedOff : LedOn);  /* Tone 3 */
+    setStepLed(MoveStep12, leds[6] ? LedOff : LedOn);  /* Tone 4 */
 
-    /* Menu LED brightness based on patch vs performance mode */
-    const perfMode = host_module_get_param('performance_mode');
+    /* Menu LED: bright in Patch mode, dim in Performance mode */
     const inPatchMode = perfMode === '0';
-    setLed(MoveMenu, inPatchMode ? WhiteLedBright : 0x40);
+    setLed(MoveMenu, inPatchMode ? WhiteLedBright : 0x20);
 }
 
 /* === Utility === */
@@ -330,9 +331,9 @@ function drawUI() {
     const y1 = 1;
     const y2 = 16;
 
-    /* Lines 1-2: Last button pressed and expansion card */
-    print(1, y1, activeButton, 1);
-    print(1, y2, `Card: ${expansionName}`, 1);
+    /* Lines 1-2: Button activity and expansion */
+    print(1, y1, `${activeButton}`, 1);
+    print(1, y2, `${expansionName}`, 1);
 
     /* JV-880 LCD area - using 4x6 pixel font */
     /* LCD takes bottom portion: 2 lines of 8 pixels each + padding */
@@ -432,18 +433,18 @@ function handleStep(stepIndex) {
         case 3:
             tapButton(MCU_BUTTON_UTILITY, 'Utility');
             return true;
-        /* Steps 9-12: TONE 1-4 */
+        /* Steps 9-12: TONE 1-4 (direct: SW1 controls leds[9]→Step9, etc.) */
         case 8:
-            tapButton(MCU_BUTTON_TONE_SW1, 'Tone 1');
+            tapButton(MCU_BUTTON_TONE_SW1, `T1`);
             return true;
         case 9:
-            tapButton(MCU_BUTTON_TONE_SW2, 'Tone 2');
+            tapButton(MCU_BUTTON_TONE_SW2, `T2`);
             return true;
         case 10:
-            tapButton(MCU_BUTTON_TONE_SW3, 'Tone 3');
+            tapButton(MCU_BUTTON_TONE_SW3, `T3`);
             return true;
         case 11:
-            tapButton(MCU_BUTTON_TONE_SW4, 'Tone 4');
+            tapButton(MCU_BUTTON_TONE_SW4, `T4`);
             return true;
         default:
             return false;
