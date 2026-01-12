@@ -736,7 +736,7 @@ static int load_expansion_data(int exp_index) {
     return 1;
 }
 
-/* Load expansion ROM into emulator's waverom_exp */
+/* Load expansion ROM into emulator's waverom_exp and cardram */
 static void load_expansion_to_emulator(int exp_index) {
     if (exp_index < 0 || exp_index >= g_expansion_count) return;
     if (exp_index == g_current_expansion) return;  /* Already loaded */
@@ -754,16 +754,25 @@ static void load_expansion_to_emulator(int exp_index) {
     /* Send All Notes Off before reset to prevent stuck keys */
     send_all_notes_off();
 
-    /* Clear the buffer first (for smaller ROMs) */
+    /* Clear the buffers first */
     memset(g_mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
+    memset(g_mcu->pcm.waverom_card, 0, 0x200000);
+    memset(g_mcu->cardram, 0, CARDRAM_SIZE);
 
-    /* Copy expansion data */
+    /* Copy first 32KB to cardram (patch/tone definitions for CPU) */
+    size_t cardram_size = (exp->rom_size < CARDRAM_SIZE) ? exp->rom_size : CARDRAM_SIZE;
+    memcpy(g_mcu->cardram, exp->unscrambled, cardram_size);
+
+    /* SR-JV80 expansion boards use banks 3-6 (waverom_exp), NOT bank 2 (waverom_card) */
+    /* Bank 2 (waverom_card) is for SO-PCM1 type 2MB cards */
+
+    /* Copy full expansion data to waverom_exp (PCM banks 3-6, up to 8MB) */
     memcpy(g_mcu->pcm.waverom_exp, exp->unscrambled, exp->rom_size);
 
     g_current_expansion = exp_index;
     /* Reset emulator so it detects the new expansion */
     g_mcu->SC55_Reset();
-    fprintf(stderr, "JV880: Loaded expansion %s to emulator (%dMB, with reset)\n",
+    fprintf(stderr, "JV880: Loaded expansion %s to emulator (%dMB, cardram + waverom, with reset)\n",
             exp->name, exp->rom_size / (1024 * 1024));
 }
 
@@ -1321,6 +1330,46 @@ static void *load_thread_func(void *arg) {
         fprintf(stderr, "JV880: Using cached patch data\n");
     }
 
+    /* Load first expansion BEFORE warmup so firmware detects the card at boot */
+    if (g_expansion_count > 0) {
+        fprintf(stderr, "JV880: Pre-loading expansion %s for boot detection...\n",
+                g_expansions[0].name);
+        /* Load expansion data if needed */
+        if (!g_expansions[0].unscrambled) {
+            load_expansion_data(0);
+        }
+        if (g_expansions[0].unscrambled) {
+            /* Copy to cardram, waverom_card, and waverom_exp before first MCU run */
+            memset(g_mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
+            memset(g_mcu->pcm.waverom_card, 0, 0x200000);
+            memset(g_mcu->cardram, 0, CARDRAM_SIZE);
+            size_t cardram_size = (g_expansions[0].rom_size < CARDRAM_SIZE) ?
+                                   g_expansions[0].rom_size : CARDRAM_SIZE;
+            memcpy(g_mcu->cardram, g_expansions[0].unscrambled, cardram_size);
+            /* Don't copy to waverom_card (bank 2) - only use waverom_exp (banks 3-6) for SR-JV80 */
+            /* size_t card_wave_size = (g_expansions[0].rom_size < 0x200000) ?
+                                     g_expansions[0].rom_size : 0x200000;
+            memcpy(g_mcu->pcm.waverom_card, g_expansions[0].unscrambled, card_wave_size); */
+            memcpy(g_mcu->pcm.waverom_exp, g_expansions[0].unscrambled, g_expansions[0].rom_size);
+            g_current_expansion = 0;
+            fprintf(stderr, "JV880: Expansion pre-loaded to cardram + waverom_card + waverom_exp\n");
+
+            /* Debug: dump first 256 bytes of cardram to see what data is there */
+            fprintf(stderr, "JV880: cardram first 256 bytes:\n");
+            for (int i = 0; i < 256; i += 16) {
+                fprintf(stderr, "  %04X: ", i);
+                for (int j = 0; j < 16; j++) {
+                    fprintf(stderr, "%02X ", g_mcu->cardram[i + j]);
+                }
+                fprintf(stderr, "\n");
+            }
+
+            /* Reset MCU so firmware re-detects expansion card */
+            g_mcu->SC55_Reset();
+            fprintf(stderr, "JV880: MCU reset to detect expansion card\n");
+        }
+    }
+
     /* Ensure a known starting patch ("A. Piano 1" in Internal A) */
     if (g_total_patches > 0) {
         select_patch(0);
@@ -1674,14 +1723,21 @@ static void jv880_set_param(const char *key, const char *val) {
         /* Cycle to next expansion (or back to internal-only)
          * g_current_expansion: -1 = internal only, 0+ = expansion index */
         if (g_expansion_count > 0) {
-            g_current_expansion++;
-            if (g_current_expansion >= g_expansion_count) {
-                g_current_expansion = -1;  /* Wrap back to internal */
+            int next_exp = g_current_expansion + 1;
+            if (next_exp >= g_expansion_count) {
+                next_exp = -1;  /* Wrap back to internal */
             }
-            if (g_current_expansion < 0) {
+            if (next_exp < 0) {
+                /* Clear expansion and reset to internal only */
+                g_current_expansion = -1;
+                send_all_notes_off();
+                memset(g_mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
+                memset(g_mcu->cardram, 0, CARDRAM_SIZE);
+                g_mcu->SC55_Reset();
                 fprintf(stderr, "JV880: Switched to internal patches only\n");
             } else {
-                load_expansion_to_emulator(g_current_expansion);
+                /* load_expansion_to_emulator sets g_current_expansion */
+                load_expansion_to_emulator(next_exp);
                 fprintf(stderr, "JV880: Switched to expansion: %s\n",
                         g_expansions[g_current_expansion].name);
             }

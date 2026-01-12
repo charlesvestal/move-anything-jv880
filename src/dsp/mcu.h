@@ -220,28 +220,36 @@ struct mcu_t {
 };
 
 enum {
-  /* JV-880 button matrix from switch board schematic (4x3 matrix, 12 buttons)
-   * Row 0 (io_sd bit 2 low = 0xFB): buttons 0-3
-   * Row 1 (io_sd bit 3 low = 0xF7): buttons 4-7
-   * Row 2 (io_sd bit 4 low = 0xEF): buttons 8-11 */
+  /* JV-880 button matrix: 5+5+4 layout (14 buttons) per Nuked-SC55
+   * Row 0 (io_sd = 0xFB): buttons 0-4
+   * Row 1 (io_sd = 0xF7): buttons 5-9
+   * Row 2 (io_sd = 0xEF): buttons 10-13 */
 
-  /* Row 0: CURSOR<, CURSOR>, TONE SELECT, TONE1 */
+  /* Row 0 */
   MCU_BUTTON_CURSOR_L = 0,
   MCU_BUTTON_CURSOR_R = 1,
   MCU_BUTTON_TONE_SELECT = 2,
-  MCU_BUTTON_TONE_SW1 = 3,
+  MCU_BUTTON_MUTE = 3,       /* Also TONE1 in patch mode */
+  MCU_BUTTON_DATA = 4,       /* DATA encoder push */
 
-  /* Row 1: TONE2, TONE3, TONE4, UTILITY */
-  MCU_BUTTON_TONE_SW2 = 4,
-  MCU_BUTTON_TONE_SW3 = 5,
-  MCU_BUTTON_TONE_SW4 = 6,
-  MCU_BUTTON_UTILITY = 7,
+  /* Row 1 */
+  MCU_BUTTON_MONITOR = 5,    /* Also TONE2 in patch mode */
+  MCU_BUTTON_COMPARE = 6,    /* Also TONE3 in patch mode */
+  MCU_BUTTON_ENTER = 7,      /* Also TONE4 in patch mode */
+  MCU_BUTTON_UTILITY = 8,
+  MCU_BUTTON_PREVIEW = 9,
 
-  /* Row 2: PATCH/PERFORM, EDIT, SYSTEM, RHYTHM */
-  MCU_BUTTON_PATCH_PERFORM = 8,
-  MCU_BUTTON_EDIT = 9,
-  MCU_BUTTON_SYSTEM = 10,
-  MCU_BUTTON_RHYTHM = 11,
+  /* Row 2 */
+  MCU_BUTTON_PATCH_PERFORM = 10,
+  MCU_BUTTON_EDIT = 11,
+  MCU_BUTTON_SYSTEM = 12,
+  MCU_BUTTON_RHYTHM = 13,
+
+  /* Aliases for tone switch buttons (same physical buttons, different names) */
+  MCU_BUTTON_TONE_SW1 = MCU_BUTTON_MUTE,
+  MCU_BUTTON_TONE_SW2 = MCU_BUTTON_MONITOR,
+  MCU_BUTTON_TONE_SW3 = MCU_BUTTON_COMPARE,
+  MCU_BUTTON_TONE_SW4 = MCU_BUTTON_ENTER,
 };
 
 constexpr uint32_t ANALOG_LEVEL_BATTERY = 0x2a0;
