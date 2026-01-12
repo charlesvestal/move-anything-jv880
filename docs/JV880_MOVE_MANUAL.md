@@ -90,14 +90,41 @@ These buttons have different functions depending on the current mode:
 
 ## Expansion Cards
 
-The JV-880 supports one expansion card slot. This module can load multiple SR-JV80 expansion ROMs, but only one is active at a time (like real hardware).
+The JV-880 supports SR-JV80 expansion cards. This module can load multiple expansion ROMs simultaneously.
 
-- **SHIFT + MENU** cycles through available expansion cards.
-- Current card is shown on Line 2 of the display.
-- "Internal" means no expansion card loaded.
-- Expansions cycle in alphabetical order.
+### Setup
 
-Place expansion ROM files in `roms/expansions/` with "SR-JV80" in the filename.
+Place expansion ROM files in `roms/expansions/` with "SR-JV80" in the filename:
+```
+roms/expansions/SR-JV80-01_Pop.bin
+roms/expansions/SR-JV80-04_Vintage_Synth.bin
+```
+
+ROMs are automatically unscrambled on first load. A patch cache speeds up subsequent loads.
+
+### Accessing Expansion Patches
+
+**Method 1: Unified Patch List (Recommended)**
+- All patches (internal + all expansions) appear in one continuous list
+- Use the **DATA dial** (jog wheel) to scroll through patches
+- The expansion loads automatically when you select one of its patches
+- Line 2 shows the current expansion name
+
+**Method 2: Manual Expansion Selection**
+- **SHIFT + MENU** cycles through available expansion cards
+- This filters the patch list to show only that expansion's patches
+- "Internal" shows only the built-in JV-880 patches
+
+### Display
+
+- Line 2 shows the currently active expansion (e.g., "01 Pop", "04 Vintage Synth")
+- "Internal" means using built-in JV-880 patches only
+
+### Notes
+
+- Only one expansion can be active at a time (like real hardware)
+- Switching expansions resets the synth engine briefly
+- Expansion patches are organized by bank (A, B, C, D per expansion)
 
 ## LED Indicators
 
@@ -109,7 +136,7 @@ LEDs reflect the actual JV-880 state:
 | Step 2 (System) | Orange when in System mode |
 | Step 3 (Rhythm) | Orange when in Rhythm mode |
 | Step 4 (Utility) | Orange when in Utility mode |
-| Steps 9-12 (Tones) | **White** = tone active (playing), **Orange** = tone muted |
+| Steps 9-12 (Tones) | **Orange** = tone active (playing), **White** = tone muted |
 | Menu | Bright when in Patch mode, dim when in Performance mode |
 
 ## Patch vs Performance Mode
