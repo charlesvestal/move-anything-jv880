@@ -6,13 +6,6 @@ Instructions for Claude Code when working with this repository.
 
 JV-880 module for Move Anything - a Roland JV-880 synthesizer emulator based on mini-jv880.
 
-## Build Commands
-
-```bash
-./scripts/build.sh      # Build with Docker (recommended)
-./scripts/install.sh    # Deploy to Move
-```
-
 ## Architecture
 
 ```
