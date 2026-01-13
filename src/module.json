@@ -8,6 +8,7 @@
   "dsp": "dsp.so",
   "api_version": 1,
   "raw_ui": true,
+  "raw_midi": true,
   "capabilities": {
     "audio_out": true,
     "audio_in": false,
