@@ -1,171 +1,248 @@
-# JV-880 on Move (Module) Manual
+# JV-880 on Move - User Manual
 
-This module turns Move into a JV-880 front panel and editor. It does not do sequencing or clip playback.
+This module turns Move into a JV-880 synthesizer with menu-driven editing.
 
 ## Quick Start
 
-1) Launch Move Anything.
-2) Select the **JV-880** module.
-3) Play pads and turn encoders to shape the sound.
+1. Launch Move Anything
+2. Select the **JV-880** module
+3. Play pads to trigger sounds
+4. Turn encoders to shape the sound (Cutoff, Resonance, Attack, etc.)
+5. Use Jog wheel to browse patches
+6. Press Menu button to access the edit menus
 
-## Surface Map (ASCII)
+## Display Layout
 
-Top row:
-  [D-PAD] [JOG] [MENU] [BACK] [SHIFT]
+The display shows 4 lines:
 
-Middle:
-  Encoders 1..8 (touch + turn)
-  Track buttons 1..4
+```
+Line 1: Activity/status messages
+Line 2: #PatchNum  PatchName     Oct:+0
+Line 3: [Menu item or encoder labels]
+Line 4: Clk:Browse  Menu:Edit
+```
 
-Bottom:
-  Steps 1..16
-  Pads 8x4 (always playable)
+**Browser Mode**: Shows patch info and encoder macro labels
+**Menu Mode**: Shows hierarchical menu navigation
 
-## UI States
+## Controls Overview
 
-- **Play** (default): performance control and patch/part selection.
-- **Edit** (MENU): full JV parameter pages.
-- **Utility** (SHIFT + MENU): system/utility access placeholder.
+### Browser Mode (Default)
 
-Navigation:
-- **MENU** enters Edit (or loads a favorite if Favorites view is active).
-- **SHIFT + MENU** enters Utility.
-- **BACK** exits one level; hold BACK returns to Play.
+| Control | Action |
+|---------|--------|
+| **Jog Wheel** | Browse patches/performances (with acceleration) |
+| **Jog Click** | Open Browse menu (patches or performances) |
+| **Menu Button** | Open Edit menu directly |
+| **Left/Right** | Previous/next patch |
+| **Shift + Left/Right** | Previous/next bank |
+| **Back Button** | Toggle Patch/Performance mode |
+| **Encoders 1-8** | Macro controls (see below) |
+| **Touch Encoder** | Show current value (3 sec minimum) |
+| **Track Buttons 1-4** | Select Tone 1-4 |
+| **Shift + Track** | Toggle tone mute |
+| **Step Buttons 1-8** | Select Part 1-8 (Performance mode only) |
+| **Shift + Step** | Toggle part mute (Performance mode only) |
+| **Pads** | Play notes (velocity sensitive) |
 
-## Display (4 Lines)
+### Menu Mode
 
-1) **HUD Line 1**: activity (encoder changes, incoming MIDI, etc.).
-2) **HUD Line 2**: mode + patch name + tone/part + RX state.
-3) **Line 3**:
-   - Play: macro labels.
-   - Edit: JV LCD line 1.
-4) **Line 4**:
-   - Play: macro labels.
-   - Edit: JV LCD line 2.
-   - Temporary help replaces line 4 for ~2 seconds after state changes.
+| Control | Action |
+|---------|--------|
+| **Jog Wheel** | Scroll through menu / adjust value |
+| **Jog Click** | Enter submenu / start editing / confirm |
+| **Up/Down** | Scroll menu items |
+| **Left/Right** | Quick adjust value (no edit mode needed) |
+| **Back Button** | Cancel edit / go back one level / exit to browser |
+| **Shift + Jog** | Fine adjust (when editing values) |
 
-## Encoders (8)
+## Encoder Macros (Browser Mode)
 
-Play State (macros):
-1 Cutoff
-2 Resonance
-3 Attack
-4 Release
-5 LFO Rate
-6 LFO Depth
-7 FX Send
-8 Level
+Touch an encoder to see its current value. Turn to adjust.
 
-Edit/Utility State:
-- Encoders map to the current page parameters (8 per page).
-- Touch shows parameter info without changing value.
-- SHIFT + turn = fine adjust.
+| Encoder | Parameter | Scope |
+|---------|-----------|-------|
+| 1 | Cutoff | Tone filter |
+| 2 | Resonance | Tone filter |
+| 3 | Attack | Tone amp envelope |
+| 4 | Release | Tone amp envelope |
+| 5 | LFO Rate | Tone LFO1 |
+| 6 | LFO Depth | Tone LFO1 filter depth |
+| 7 | Reverb Send | Tone output |
+| 8 | Level | Tone amp |
 
-## Pads
+- Encoders have acceleration: slow turn = fine control, fast turn = coarse
+- Hold **Shift** while turning for fine adjustment (±1 steps)
+- Macros affect the currently selected tone
 
-- Always play the engine (not repurposed for editing).
-- Velocity affects level; aftertouch follows JV modulation routing.
+## Menu Structure
 
-## Jog + D-pad
+### Browse Menu (Jog Click)
+- **Browse Patches** (in Patch mode) - Navigate by bank, select patches
+- **Browse Performances** (in Performance mode) - Navigate performance banks
 
-Play State (Patch Mode):
-- **Left/Right/Jog**: patch change (cycles through 192 internal patches + expansions).
-- **SHIFT + Left/Right**: bank change (Preset A, Preset B, Internal, expansions).
+### Edit Menu (Menu Button)
+- **Common** - Patch-level settings (level, pan, portamento, bend range)
+- **Tone 1-4** - Individual tone editing
+- **Effects** - Reverb and chorus settings
+- **Settings** - Octave, local control, MIDI monitor, SysEx RX
 
-Play State (Performance Mode):
-- **Left/Right/Jog**: performance change (cycles through 8 user performances).
-- **SHIFT + Left/Right**: no effect (performances have no banks).
-
-Edit/Utility State:
-- **Left/Right/Up/Down**: parameter selection.
-- **Jog**: value change.
+### Tone Submenu
+- **Enable** - Tone on/off
+- **Wave Group** - INT-A, INT-B, PCM, EXP-A/B/C/D
+- **Wave Number** - 0-255
+- **Level** - Tone volume
+- **Filter (TVF)** - Cutoff, resonance, envelope, key follow
+- **Amp (TVA)** - Level, velocity sense, envelope
+- **Pitch** - Coarse, fine, pitch envelope
+- **LFO 1/2** - Rate, delay, fade, modulation depths
+- **Output/FX** - Dry level, reverb/chorus sends
 
 ## Patch Mode vs Performance Mode
 
-The JV-880 has two operating modes, switched via Step 1 and Step 2:
+Toggle between modes using the **Back button** in browser mode.
 
-**Patch Mode** (Step 1):
-- Single patch plays on MIDI channel 1.
-- 192 internal patches (Preset A, Preset B, Internal) plus expansions.
-- 4 tones per patch, each with independent sound parameters.
-- Ideal for: solo instruments, layered sounds, split keyboards.
+**Patch Mode**:
+- Single patch on MIDI channel 1
+- 192 internal patches + expansion patches
+- Full editing of all 4 tones
+- Browse by bank: Preset A, Preset B, Internal, Expansions
+- Track buttons 1-4 select Tone 1-4
 
-**Performance Mode** (Step 2):
-- 8 parts, each on its own MIDI channel (1–8), with Part 8 as Rhythm.
-- 8 user performances stored in NVRAM.
-- Each part references a patch and has level/pan/key range settings.
-- Ideal for: multitimbral setups, layered orchestrations, backing tracks.
+**Performance Mode**:
+- 8 parts on MIDI channels 1-8
+- 48 performances (3 banks × 16)
+- Step buttons 1-8 select Part 1-8
+- Shift + Step toggles part mute
+- **Browse only** - editing not available (switch to Patch mode to edit)
+- Part 8 is the Rhythm part
 
-## Track Buttons (4)
+## Parameter Editing
 
-Patch Mode:
-- Track 1–4 selects Tone 1–4.
-- SHIFT + Track toggles tone mute.
+When editing a value:
+1. **Jog Click** to enter edit mode (value highlights)
+2. **Jog Wheel** to adjust value
+3. **Jog Click** again to confirm
+4. **Back** to cancel and restore original
 
-Performance Mode:
-- Track 1–4 selects Part 1–4 (or 5–8 with Step 6).
-- SHIFT + Track toggles part mute.
-- Step 6 toggles between Parts 1–4 and Parts 5–8.
-- Part 8 is the Rhythm part (drums).
+Quick adjust (no edit mode):
+- **Left/Right arrows** adjust value immediately
+- Works on VALUE and ENUM type parameters
 
-## Step Buttons (16)
+## Supported Parameters (NVRAM Reading)
 
-Play State shortcuts:
-1. **Patch Mode** - single patch, 4 tones (LED lit when active)
-2. **Performance Mode** - 8 parts, multitimbral (LED lit when active)
-3. Rhythm Focus
-4. FX page
-5. Favorites view (toggle)
-6. Part Bank toggle (Parts 1–4 ↔ 5–8, LED lit for 5–8)
-7. Octave -
-8. Octave +
-9. Transpose -
-10. Transpose +
-11. Velocity Mode (HUD only)
-12. MIDI Monitor toggle (HUD only)
-13. Output/FX page
-14. Local Control toggle (HUD only)
-15. SysEx RX/Thru toggle (HUD only)
-16. Utility shortcut
+All parameters below can be read directly from the emulator and display their actual values:
 
-Edit State tabs:
-1. HOME
-2. COMMON
-3. TONE/WG
-4. PITCH
-5. TVF
-6. TVA
-7. LFO (SHIFT + this tab toggles LFO1/2)
-8. OUT/FX
-9. MOD
-10. CTRL
-11. STRUCT (Not used)
-12. MIX
-13. PART
-14. RHYTHM
-15. FX
-16. UTIL
+### Patch Common
+| Parameter | Range | Notes |
+|-----------|-------|-------|
+| Level | 0-127 | Patch output level |
+| Pan | 0-127 | 64=Center, <64=Left, >64=Right |
+| Portamento Switch | On/Off | |
+| Portamento Time | 0-127 | |
+| Bend Range Up | 0-12 | Semitones |
+| Bend Range Down | 0-48 | Semitones |
+| Reverb Level | 0-127 | |
+| Reverb Time | 0-127 | |
+| Chorus Level | 0-127 | |
+| Chorus Rate | 0-127 | |
+| Chorus Depth | 0-127 | |
 
-## Transport / Utility Buttons
+### Tone Parameters (per tone)
+| Parameter | Range | Notes |
+|-----------|-------|-------|
+| Enable (toneswitch) | On/Off | |
+| Wave Group | INT-A/B, PCM, EXP-A/B/C/D | |
+| Wave Number | 0-255 | |
+| Level | 0-127 | Tone volume |
+| Pan | 0-127 | |
+| Cutoff | 0-127 | Filter frequency |
+| Resonance | 0-127 | Filter resonance |
+| Cutoff Key Follow | 0-127 | |
+| TVF Env Depth | 0-127 | Filter envelope amount |
+| TVF Env Time 1-4 | 0-127 | ADSR times |
+| TVF Env Level 1-4 | 0-127 | ADSR levels |
+| TVA Velocity Sense | 0-127 | |
+| TVA Env Time 1-4 | 0-127 | ADSR times |
+| TVA Env Level 1-3 | 0-127 | ADR levels |
+| Pitch Coarse | 0-127 | 64=0, display as ±semitones |
+| Pitch Fine | 0-127 | 64=0, display as ±cents |
+| Pitch Env Depth | 0-127 | |
+| Pitch Env Time 1-4 | 0-127 | |
+| LFO 1/2 Rate | 0-127 | |
+| LFO 1/2 Delay | 0-127 | |
+| LFO 1/2 Fade | 0-127 | |
+| LFO 1/2 Pitch Depth | 0-127 | |
+| LFO 1/2 TVF Depth | 0-127 | |
+| LFO 1/2 TVA Depth | 0-127 | |
+| Dry Level | 0-127 | |
+| Reverb Send | 0-127 | |
+| Chorus Send | 0-127 | |
 
-- PLAY: audition latch (HUD only for now).
-- REC (seq): MIDI monitor toggle (HUD only).
-- LOOP: sustain latch (on/off).
-- CAPTURE: compare (HUD only).
-- REC (audio): Panic / All Notes Off.
-- SHIFT + REC (audio): Reset controllers.
-- MUTE: mute selected tone/part.
-- COPY: copy (HUD only).
-- DELETE: init/clear confirm (MENU = confirm, BACK = cancel).
-- UNDO: undo (HUD only); SHIFT + UNDO: redo (HUD only).
+## Known Limitations
 
-## Favorites
+### Performance Mode Editing
+Performance editing is not available. The emulator's NVRAM layout for performance data is unknown. You can:
+- Browse and select performances
+- Use Patch mode for full editing capability
+- The Edit menu in Performance mode only provides Settings access
 
-- Step 5 toggles Favorites view.
-- SHIFT + Step 5 adds/removes current patch to favorites.
-- In Favorites view:
-  - Jog or Left/Right selects.
-  - MENU loads selection.
-  - BACK exits.
+### Parameter Reading
+Parameters are read from NVRAM when a patch is loaded. If you edit via external SysEx, the display may not update until you reload the patch.
 
-Favorites save to `favorites.json` in the module folder.
+### Saving Patches
+Patch saving is not yet implemented. Edits affect the temporary working patch but are not persisted to NVRAM.
+
+## Troubleshooting
+
+**No sound**:
+- Check that ROM files are in the correct location
+- Verify ROM version is 1.0.0 (not 1.0.1)
+- Check MIDI routing if using external controller
+
+**Parameters show 0**:
+- Reload the patch (select it again)
+- Some parameters may not be mapped yet
+
+**Slow patch loading**:
+- First load builds patch cache
+- Subsequent loads are faster
+- Expansions load on-demand when selected
+
+## Technical Reference
+
+### NVRAM Layout (Patch Data at 0x0d70)
+```
+Offset  Size  Content
+0-11    12    Patch name
+12      1     Reverb/Chorus config
+13-15   3     Reverb params
+16-19   4     Chorus params
+20      1     Analog feel
+21      1     Level
+22      1     Pan
+23      1     Bend range (down)
+24      1     Flags (bend up, porta, key assign)
+25      1     Portamento time
+26-109  84    Tone 1
+110-193 84    Tone 2
+194-277 84    Tone 3
+278-361 84    Tone 4
+```
+
+### Tone Structure (84 bytes each)
+```
+Offset  Content
+0       Flags (wave group bits 0-1, tone switch bit 7)
+1       Wave number
+2       FXM config
+3-4     Velocity range
+5-22    Modulation matrix
+23-30   LFO 1/2 config
+31-36   LFO depths
+37-38   Pitch coarse/fine
+39-51   Pitch envelope
+52-66   TVF (filter) params
+67-80   TVA (amp) params
+81-83   Dry/Reverb/Chorus sends
+```

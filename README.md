@@ -4,6 +4,15 @@ Roland JV-880 synthesizer emulator module for [Move Anything](https://github.com
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
+## Features
+
+- Full JV-880 emulation with 192 internal patches
+- Multiple SR-JV80 expansion card support
+- Menu-driven parameter editing with real-time value display
+- Encoder macros for quick sound shaping (Cutoff, Resonance, Attack, Release, etc.)
+- Touch-sensitive encoders show current parameter values
+- Patch and Performance mode browsing
+
 ## Requirements
 
 - Move Anything installed on your Ableton Move
@@ -64,21 +73,22 @@ cd move-anything-jv880
 ./scripts/install.sh
 ```
 
-## Editor Manual
+## User Manual
 
 See `docs/JV880_MOVE_MANUAL.md` for the full control map and editor workflow.
-
-## Editor Manual
-
-See `docs/editor_manual.md` for a full control map and workflow.
 
 ## Signal Chain Integration
 
 JV-880 works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using JV-880 with arpeggiators and effects.
 
+## Current Limitations
+
+- **Performance mode editing**: Part-level parameters (level, pan, MIDI channel) cannot be read from the emulator. Performance browsing and selection works, but editing shows placeholder menus.
+- **Patch mode editing**: Fully supported with real-time parameter reading from NVRAM.
+
 ## Performance
 
-- CPU usage: ~80% on Move's CM4 (varies with expansions)
+- CPU usage: ~38% on Move's CM4 (varies with patch complexity)
 - Latency: ~46ms (buffered emulation)
 
 ## License
