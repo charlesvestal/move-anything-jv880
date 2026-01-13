@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build with Docker
+        run: |
+          docker build -t module-builder -f scripts/Dockerfile .
+          docker run --rm -v "$PWD:/build" -w /build module-builder ./scripts/build.sh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/jv880-module.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
