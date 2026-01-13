@@ -2,6 +2,8 @@ This project includes code from:
 
 1. mini-jv880 by giulioz (https://github.com/giulioz/mini-jv880)
 2. Nuked-SC55 by nukeykt (https://github.com/nukeykt/Nuked-SC55)
+3. libresample by Dominic Mazzoni (BSD license)
+   http://www-ccrma.stanford.edu/~jos/resample/
 
 The emulation code is licensed under the following terms:
 
