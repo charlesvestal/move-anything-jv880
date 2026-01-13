@@ -4,6 +4,20 @@ Roland JV-880 synthesizer emulator module for [Move Anything](https://github.com
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
+## Quick Start
+
+**Already have ROMs and Move Anything installed?**
+
+1. Launch Move Anything → **Module Store** → **Sound Generators** → **JV-880** → **Install**
+2. Copy your ROM files to Move (see Requirements below)
+3. Select **JV-880** from the main menu
+4. **Play pads** - you're making JV-880 sounds!
+5. **Jog wheel** to browse 192+ patches
+6. **Encoders 1-8** for quick sound shaping (Cutoff, Resonance, Attack, etc.)
+7. **Menu button** for deep editing
+
+See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentation.
+
 ## Features
 
 - Full JV-880 emulation with 192 internal patches
@@ -13,10 +27,14 @@ Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which i
 - Touch-sensitive encoders show current parameter values
 - Patch and Performance mode browsing
 
+## Prerequisites
+
+- [Move Anything](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
+- SSH access enabled: http://move.local/development/ssh
+
 ## Requirements
 
-- Move Anything installed on your Ableton Move
-- JV-880 ROM files (v1.0.0):
+JV-880 ROM files (v1.0.0):
   - `jv880_rom1.bin` (32KB)
   - `jv880_rom2.bin` (256KB)
   - `jv880_waverom1.bin` (2MB)
