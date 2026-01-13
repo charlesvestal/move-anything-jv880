@@ -94,10 +94,18 @@ const menuStack = createMenuStack();
 const menuState = createMenuState();
 
 let currentPreset = 0;
+let patchInBank = 1;  /* 1-indexed position within current bank */
 let totalPatches = 128;
 let bankName = 'JV-880';
 let bankCount = 0;
 let patchName = '---';
+let bankScrollOffset = 0;
+let bankScrollTick = 0;
+let bankScrollPaused = false;
+let bankPauseTick = 0;
+const BANK_SCROLL_DELAY = 480;   /* ~8 sec before scrolling starts */
+const BANK_SCROLL_INTERVAL = 24; /* Frames between scroll steps (~400ms) */
+const BANK_SCROLL_PAUSE = 480;   /* ~8 sec pause at end before restart */
 let lcdLine0 = '';
 let lcdLine1 = '';
 let loadingStatus = 'Initializing...';
@@ -138,7 +146,9 @@ function getStateForModules() {
         mode,
         patchName,
         bankName,
+        bankScrollOffset,
         currentPreset,
+        patchInBank,
         totalPatches,
         selectedTone,
         selectedPart,
@@ -763,7 +773,21 @@ function updateFromDSP() {
     const bank = host_module_get_param('bank_name');
     if (bank && bank !== bankName) {
         bankName = bank;
+        /* Reset scroll state on bank change */
+        bankScrollOffset = 0;
+        bankScrollTick = 0;
+        bankScrollPaused = false;
+        bankPauseTick = 0;
         needsRedraw = true;
+    }
+
+    const pib = host_module_get_param('patch_in_bank');
+    if (pib) {
+        const p = parseInt(pib);
+        if (p > 0 && p !== patchInBank) {
+            patchInBank = p;
+            needsRedraw = true;
+        }
     }
 
     if (mode === 'performance') {
@@ -847,6 +871,53 @@ globalThis.tick = function() {
     /* Tick overlay timer (only auto-hides if not being refreshed) */
     if (tickOverlay()) {
         needsRedraw = true;
+    }
+
+    /* Bank name scrolling for long names (matches menu scroll behavior) */
+    const charWidth = 6;
+    const modeChars = 7;  /* "PATCH  " or "PERF   " */
+    const numChars = 5;   /* " #nnn" */
+    const maxBankChars = Math.floor(SCREEN_WIDTH / charWidth) - modeChars - numChars;
+    const maxOffset = bankName.length - maxBankChars;
+
+    if (bankName.length > maxBankChars) {
+        bankScrollTick++;
+
+        /* Handle pause at end */
+        if (bankScrollPaused) {
+            bankPauseTick++;
+            if (bankPauseTick >= BANK_SCROLL_PAUSE) {
+                /* Reset after pause */
+                bankScrollOffset = 0;
+                bankScrollPaused = false;
+                bankScrollTick = 0;
+                bankPauseTick = 0;
+                needsRedraw = true;
+            }
+        }
+        /* Wait for initial delay */
+        else if (bankScrollTick < BANK_SCROLL_DELAY) {
+            /* Still waiting */
+        }
+        /* Scroll one character per interval */
+        else if ((bankScrollTick - BANK_SCROLL_DELAY) % BANK_SCROLL_INTERVAL === 0) {
+            if (bankScrollOffset >= maxOffset) {
+                /* Reached end, start pause */
+                bankScrollPaused = true;
+                bankPauseTick = 0;
+            } else {
+                bankScrollOffset++;
+                needsRedraw = true;
+            }
+        }
+    } else {
+        /* Text fits, reset scroll state */
+        if (bankScrollOffset !== 0) {
+            bankScrollOffset = 0;
+            needsRedraw = true;
+        }
+        bankScrollTick = 0;
+        bankScrollPaused = false;
     }
 
     tickCount++;

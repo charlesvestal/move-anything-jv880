@@ -1411,6 +1411,13 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "%s", get_current_bank_name());
         return 1;
     }
+    if (strcmp(key, "patch_in_bank") == 0) {
+        /* Return 1-indexed position within current bank */
+        int bank = get_bank_for_patch(g_current_patch);
+        int pos = g_current_patch - g_bank_starts[bank] + 1;
+        snprintf(buf, buf_len, "%d", pos);
+        return 1;
+    }
     if (strcmp(key, "loading_status") == 0) {
         snprintf(buf, buf_len, "%s", g_loading_status);
         return 1;
