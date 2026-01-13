@@ -249,12 +249,123 @@ Steps 1-8: [BRIGHT] [dim] [grey] [dim] [off] [off] [off] [off]
 - **MENU**: Bright when in edit menu
 - **MUTE**: Red when selected tone/part is muted
 
+## Shared Menu Components (move-anything repo)
+
+Before implementing the JV-880 UI, we'll build shared menu components in move-anything that can be reused across modules.
+
+### MenuStack (`src/shared/menu_stack.mjs`)
+
+Manages hierarchical navigation history:
+
+```javascript
+import { createMenuStack } from '../../shared/menu_stack.mjs';
+
+const stack = createMenuStack();
+stack.push({ id: 'part1', title: 'Part 1', items: [...] });
+stack.pop();        // returns to previous menu
+stack.current();    // get current menu state
+stack.depth();      // how deep in hierarchy
+stack.reset();      // clear to root
+```
+
+### MenuItem Types (`src/shared/menu_items.mjs`)
+
+Standardized menu item definitions:
+
+```javascript
+// Submenu - click enters child menu
+{ type: 'submenu', label: 'Filter', getMenu: () => filterMenuItems }
+
+// Value - click to edit, jog/arrows change, click confirms
+{ type: 'value', label: 'Cutoff', get: () => value, set: (v) => {}, min: 0, max: 127 }
+
+// Enum - click to edit, jog/arrows cycle options
+{ type: 'enum', label: 'Wave', get: () => value, set: (v) => {}, options: ['saw', 'square'] }
+
+// Toggle - click toggles, or arrows change
+{ type: 'toggle', label: 'Enable', get: () => bool, set: (v) => {} }
+
+// Action - click executes callback
+{ type: 'action', label: 'Initialize', onAction: () => {} }
+
+// Back - returns to parent menu
+{ type: 'back', label: '[Back]' }
+```
+
+### Menu Navigation (`src/shared/menu_nav.mjs`)
+
+Handles input for hierarchical menus:
+
+```javascript
+import { handleMenuInput } from '../../shared/menu_nav.mjs';
+
+// Returns: { needsRedraw, exitMenu, valueChanged }
+const result = handleMenuInput({
+    cc,
+    value,
+    stack,           // MenuStack instance
+    selectedIndex,
+    editingValue,    // true if in value-edit mode
+});
+```
+
+**Input behavior:**
+- **Jog wheel**: Scroll list (navigate mode) or change value (edit mode)
+- **Jog click**: Enter submenu, start editing value, confirm edit, or execute action
+- **Left/Right arrows**: Change value without entering edit mode (quick adjust)
+- **Back button**: Exit edit mode (cancel), or pop menu stack
+
+**Edit mode visual:**
+- Selected item shows inverted highlight when navigating
+- Editing item shows different indicator (e.g., blinking or bracket around value)
+
+### Menu Renderer (`src/shared/menu_render.mjs`)
+
+Extended drawing functions:
+
+```javascript
+import { drawHierarchicalMenu } from '../../shared/menu_render.mjs';
+
+drawHierarchicalMenu({
+    stack,
+    selectedIndex,
+    editingValue,
+    editingIndex,
+});
+```
+
+Shows breadcrumb or title from stack, renders items with appropriate value display.
+
+## Implementation Order
+
+### Phase 1: Shared Components (move-anything repo)
+
+1. Create `menu_stack.mjs` - navigation history management
+2. Create `menu_items.mjs` - item type definitions and helpers
+3. Create `menu_nav.mjs` - input handling with edit mode
+4. Extend `menu_layout.mjs` or create `menu_render.mjs` - hierarchical rendering
+
+### Phase 2: Settings Migration (move-anything repo)
+
+1. Refactor `menu_settings.mjs` to use new shared components
+2. Convert settings items to MenuItem types
+3. Add click-to-edit behavior (replacing arrow-only editing)
+4. Test navigation and value editing
+
+### Phase 3: JV-880 UI (this repo)
+
+1. Import shared components
+2. Build menu structure (Browse, Edit, Settings)
+3. Implement browser mode (large patch display)
+4. Wire up physical controls (tracks, steps, knobs)
+5. Implement LED feedback
+
 ## Implementation Notes
 
-- Use shared menu components from move-anything repo
 - Menu state persists when exiting to browser (re-entering returns to same position)
 - Knob changes apply immediately (no confirmation needed)
 - Menu value changes require click to confirm, BACK to cancel
+- Left/Right arrows provide quick value adjustment without entering edit mode
 
 ## Migration
 
