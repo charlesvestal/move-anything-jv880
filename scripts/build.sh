@@ -66,6 +66,8 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
 echo "Packaging..."
 cat src/module.json > dist/jv880/module.json
 cat src/ui.js > dist/jv880/ui.js
+cat src/ui_menu.mjs > dist/jv880/ui_menu.mjs
+cat src/ui_browser.mjs > dist/jv880/ui_browser.mjs
 cat src/jv880_sysex.mjs > dist/jv880/jv880_sysex.mjs
 cat build/dsp.so > dist/jv880/dsp.so
 chmod +x dist/jv880/dsp.so

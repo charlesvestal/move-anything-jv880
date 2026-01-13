@@ -1353,6 +1353,290 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "8");
         return 1;
     }
+    /* Query individual patch name by index: patch_<index>_name */
+    if (strncmp(key, "patch_", 6) == 0 && strstr(key, "_name")) {
+        int idx = atoi(key + 6);
+        if (idx >= 0 && idx < g_total_patches) {
+            snprintf(buf, buf_len, "%s", g_patches[idx].name);
+            return 1;
+        }
+        snprintf(buf, buf_len, "---");
+        return 1;
+    }
+    /* Query performance name by index: perf_<index>_name */
+    if (strncmp(key, "perf_", 5) == 0 && strstr(key, "_name")) {
+        int idx = atoi(key + 5);
+        if (idx >= 0 && idx < NUM_PERFORMANCES) {
+            /* If this is the current performance and we're in perf mode, get from LCD */
+            if (g_performance_mode && idx == g_current_performance && g_mcu) {
+                const char* lcd_line = g_mcu->lcd.GetLine(0);
+                const char* name_start = lcd_line;
+                const char* colon = strchr(lcd_line, ':');
+                if (colon) {
+                    const char* space = strchr(colon, ' ');
+                    if (space) name_start = space + 1;
+                }
+                int len = strlen(name_start);
+                while (len > 0 && name_start[len - 1] == ' ') len--;
+                if (len > 0 && len < buf_len) {
+                    memcpy(buf, name_start, len);
+                    buf[len] = '\0';
+                    return 1;
+                }
+            }
+            /* Bank and number labels */
+            int bank = idx / PERFS_PER_BANK;
+            int num = (idx % PERFS_PER_BANK) + 1;
+            const char* bank_names[] = {"PA", "PB", "INT"};
+            snprintf(buf, buf_len, "%s:%02d", bank_names[bank], num);
+            return 1;
+        }
+        snprintf(buf, buf_len, "---");
+        return 1;
+    }
+    /* Query bank info: bank_<index>_name, bank_<index>_start, bank_<index>_count */
+    if (strncmp(key, "bank_", 5) == 0) {
+        int idx = atoi(key + 5);
+        if (strstr(key, "_name") && idx >= 0 && idx < g_bank_count) {
+            snprintf(buf, buf_len, "%s", g_bank_names[idx]);
+            return 1;
+        }
+        if (strstr(key, "_start") && idx >= 0 && idx < g_bank_count) {
+            snprintf(buf, buf_len, "%d", g_bank_starts[idx]);
+            return 1;
+        }
+        if (strstr(key, "_count") && idx >= 0 && idx < g_bank_count) {
+            int next_start = (idx + 1 < g_bank_count) ? g_bank_starts[idx + 1] : g_total_patches;
+            snprintf(buf, buf_len, "%d", next_start - g_bank_starts[idx]);
+            return 1;
+        }
+    }
+    /* Read tone parameter by name: nvram_tone_<toneIdx>_<paramName>
+     * Maps SysEx parameter names to actual NVRAM byte offsets.
+     * Patch layout (362 bytes at 0x0d70):
+     *   - Patch common: 26 bytes (0-25)
+     *   - Tone 0: 84 bytes (26-109)
+     *   - Tone 1: 84 bytes (110-193)
+     *   - Tone 2: 84 bytes (194-277)
+     *   - Tone 3: 84 bytes (278-361)
+     */
+    if (strncmp(key, "nvram_tone_", 11) == 0 && g_mcu) {
+        int toneIdx = atoi(key + 11);
+        const char* underscore = strchr(key + 11, '_');
+        if (underscore && toneIdx >= 0 && toneIdx < 4) {
+            const char* paramName = underscore + 1;
+            int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+            int offset = -1;
+            int bitMask = 0;  /* 0 = full byte, otherwise extract specific bit */
+
+            /* Map parameter names to NVRAM offsets within tone (based on jv880_juce dataStructures.h)
+             * Tone structure is 84 bytes, offsets verified against jv880_juce */
+            if (strcmp(paramName, "toneswitch") == 0) {
+                offset = 0; bitMask = 0x80;  /* flags byte, bit 7 */
+            } else if (strcmp(paramName, "wavegroup") == 0) {
+                offset = 0; bitMask = 0x03;  /* flags byte, bits 0-1 */
+            } else if (strcmp(paramName, "wavenumber") == 0) {
+                offset = 1;
+            } else if (strcmp(paramName, "fxmswitch") == 0) {
+                offset = 2; bitMask = 0x80;  /* fxmConfig bit 7 */
+            } else if (strcmp(paramName, "fxmdepth") == 0) {
+                offset = 2; bitMask = 0x3F;  /* fxmConfig bits 0-5 */
+            } else if (strcmp(paramName, "velocityrangelower") == 0) {
+                offset = 3;
+            } else if (strcmp(paramName, "velocityrangeupper") == 0) {
+                offset = 4;
+            /* LFO 1 parameters (offsets 23-26, 31-33) */
+            } else if (strcmp(paramName, "lfo1rate") == 0) {
+                offset = 24;
+            } else if (strcmp(paramName, "lfo1delay") == 0) {
+                offset = 25;
+            } else if (strcmp(paramName, "lfo1fadetime") == 0) {
+                offset = 26;  /* lfo1Fade */
+            } else if (strcmp(paramName, "lfo1pitchdepth") == 0) {
+                offset = 31;
+            } else if (strcmp(paramName, "lfo1tvfdepth") == 0) {
+                offset = 32;
+            } else if (strcmp(paramName, "lfo1tvadepth") == 0) {
+                offset = 33;
+            /* LFO 2 parameters (offsets 27-30, 34-36) */
+            } else if (strcmp(paramName, "lfo2rate") == 0) {
+                offset = 28;
+            } else if (strcmp(paramName, "lfo2delay") == 0) {
+                offset = 29;
+            } else if (strcmp(paramName, "lfo2fadetime") == 0) {
+                offset = 30;  /* lfo2Fade */
+            } else if (strcmp(paramName, "lfo2pitchdepth") == 0) {
+                offset = 34;
+            } else if (strcmp(paramName, "lfo2tvfdepth") == 0) {
+                offset = 35;
+            } else if (strcmp(paramName, "lfo2tvadepth") == 0) {
+                offset = 36;
+            /* Pitch parameters (offsets 37-51) */
+            } else if (strcmp(paramName, "pitchcoarse") == 0) {
+                offset = 37;
+            } else if (strcmp(paramName, "pitchfine") == 0) {
+                offset = 38;
+            } else if (strcmp(paramName, "penvdepth") == 0) {
+                offset = 43;  /* tvpEnvDepth */
+            } else if (strcmp(paramName, "penvtime1") == 0) {
+                offset = 44;
+            } else if (strcmp(paramName, "penvlevel1") == 0) {
+                offset = 45;
+            } else if (strcmp(paramName, "penvtime2") == 0) {
+                offset = 46;
+            } else if (strcmp(paramName, "penvlevel2") == 0) {
+                offset = 47;
+            } else if (strcmp(paramName, "penvtime3") == 0) {
+                offset = 48;
+            } else if (strcmp(paramName, "penvlevel3") == 0) {
+                offset = 49;
+            } else if (strcmp(paramName, "penvtime4") == 0) {
+                offset = 50;
+            } else if (strcmp(paramName, "penvlevel4") == 0) {
+                offset = 51;
+            /* TVF (filter) parameters (offsets 52-66) */
+            } else if (strcmp(paramName, "cutofffrequency") == 0) {
+                offset = 52;  /* tvfCutoff */
+            } else if (strcmp(paramName, "resonance") == 0) {
+                offset = 53;  /* tvfResonance */
+            } else if (strcmp(paramName, "cutoffkeyfollow") == 0) {
+                offset = 54;  /* tvfTimeKFKeyfollow - lower nibble is keyfollow */
+                bitMask = 0x0F;
+            } else if (strcmp(paramName, "tvfenvdepth") == 0) {
+                offset = 58;
+            } else if (strcmp(paramName, "tvfenvtime1") == 0) {
+                offset = 59;
+            } else if (strcmp(paramName, "tvfenvlevel1") == 0) {
+                offset = 60;
+            } else if (strcmp(paramName, "tvfenvtime2") == 0) {
+                offset = 61;
+            } else if (strcmp(paramName, "tvfenvlevel2") == 0) {
+                offset = 62;
+            } else if (strcmp(paramName, "tvfenvtime3") == 0) {
+                offset = 63;
+            } else if (strcmp(paramName, "tvfenvlevel3") == 0) {
+                offset = 64;
+            } else if (strcmp(paramName, "tvfenvtime4") == 0) {
+                offset = 65;
+            } else if (strcmp(paramName, "tvfenvlevel4") == 0) {
+                offset = 66;
+            /* TVA (amp) parameters (offsets 67-80) */
+            } else if (strcmp(paramName, "level") == 0) {
+                offset = 67;  /* tvaLevel */
+            } else if (strcmp(paramName, "pan") == 0) {
+                offset = 68;  /* tvaPan */
+            } else if (strcmp(paramName, "tonedelaytime") == 0) {
+                offset = 69;  /* tvaDelayTime */
+            } else if (strcmp(paramName, "tvaenvvelocitylevelsense") == 0) {
+                offset = 72;  /* tvaVelocity - packed, but we return full byte for now */
+            } else if (strcmp(paramName, "tvaenvtime1") == 0) {
+                offset = 74;
+            } else if (strcmp(paramName, "tvaenvlevel1") == 0) {
+                offset = 75;
+            } else if (strcmp(paramName, "tvaenvtime2") == 0) {
+                offset = 76;
+            } else if (strcmp(paramName, "tvaenvlevel2") == 0) {
+                offset = 77;
+            } else if (strcmp(paramName, "tvaenvtime3") == 0) {
+                offset = 78;
+            } else if (strcmp(paramName, "tvaenvlevel3") == 0) {
+                offset = 79;
+            } else if (strcmp(paramName, "tvaenvtime4") == 0) {
+                offset = 80;
+            /* Output/FX sends (offsets 81-83) */
+            } else if (strcmp(paramName, "drylevel") == 0) {
+                offset = 81;
+            } else if (strcmp(paramName, "reverbsendlevel") == 0) {
+                offset = 82;
+            } else if (strcmp(paramName, "chorussendlevel") == 0) {
+                offset = 83;
+            }
+
+            if (offset >= 0 && offset < 84) {
+                uint8_t val = g_mcu->nvram[toneBase + offset];
+                if (bitMask != 0) {
+                    val = (val & bitMask);
+                    if (bitMask == 0x80) val = val ? 1 : 0;  /* Boolean for bit 7 */
+                }
+                snprintf(buf, buf_len, "%d", val);
+                return 1;
+            }
+        }
+    }
+
+    /* Read patch common parameter by name: nvram_patchCommon_<paramName>
+     * Patch common is 26 bytes (0-25) based on jv880_juce dataStructures.h:
+     *   0-11: name (12 bytes)
+     *   12: revChorConfig
+     *   13-15: reverb (level, time, feedback)
+     *   16-19: chorus (level, depth, rate, feedback)
+     *   20: analogFeel
+     *   21: level
+     *   22: pan
+     *   23: bendRange (bend down range)
+     *   24: flags (bits 0-3: bend up, bit 4: porta mode, bit 5: solo legato, bit 6: porta switch, bit 7: key assign)
+     *   25: portamentoTime
+     */
+    if (strncmp(key, "nvram_patchCommon_", 18) == 0 && g_mcu) {
+        const char* paramName = key + 18;
+        int offset = -1;
+        int bitMask = 0;
+
+        /* Map parameter names to NVRAM offsets (based on jv880_juce) */
+        if (strcmp(paramName, "patchlevel") == 0) {
+            offset = 21;
+        } else if (strcmp(paramName, "patchpan") == 0 || strcmp(paramName, "patchpanning") == 0) {
+            offset = 22;
+        } else if (strcmp(paramName, "analogfeel") == 0) {
+            offset = 20;
+        } else if (strcmp(paramName, "reverblevel") == 0) {
+            offset = 13;
+        } else if (strcmp(paramName, "reverbtime") == 0) {
+            offset = 14;
+        } else if (strcmp(paramName, "reverbfeedback") == 0) {
+            offset = 15;
+        } else if (strcmp(paramName, "choruslevel") == 0) {
+            offset = 16;
+        } else if (strcmp(paramName, "chorusdepth") == 0) {
+            offset = 17;
+        } else if (strcmp(paramName, "chorusrate") == 0) {
+            offset = 18;
+        } else if (strcmp(paramName, "chorusfeedback") == 0) {
+            offset = 19;
+        } else if (strcmp(paramName, "bendrangedown") == 0) {
+            offset = 23;  /* bendRange byte = bend down range */
+        } else if (strcmp(paramName, "bendrangeup") == 0) {
+            offset = 24;  /* flags byte, bits 0-3 = bend up range */
+            bitMask = 0x0F;
+        } else if (strcmp(paramName, "portamentoswitch") == 0) {
+            offset = 24;  /* flags byte, bit 6 */
+            bitMask = 0x40;
+        } else if (strcmp(paramName, "portamentomode") == 0) {
+            offset = 24;  /* flags byte, bit 4 */
+            bitMask = 0x10;
+        } else if (strcmp(paramName, "sololegato") == 0) {
+            offset = 24;  /* flags byte, bit 5 */
+            bitMask = 0x20;
+        } else if (strcmp(paramName, "keyassign") == 0) {
+            offset = 24;  /* flags byte, bit 7 */
+            bitMask = 0x80;
+        } else if (strcmp(paramName, "portamentotime") == 0) {
+            offset = 25;
+        }
+
+        if (offset >= 0 && offset < 26) {
+            uint8_t val = g_mcu->nvram[NVRAM_PATCH_OFFSET + offset];
+            if (bitMask != 0) {
+                val = (val & bitMask);
+                /* Convert single-bit masks to boolean 0/1 */
+                if (bitMask == 0x40 || bitMask == 0x10 || bitMask == 0x20 || bitMask == 0x80) {
+                    val = val ? 1 : 0;
+                }
+            }
+            snprintf(buf, buf_len, "%d", val);
+            return 1;
+        }
+    }
     /* Note: tempo and clock_mode are now host settings */
     return 0;
 }
