@@ -170,7 +170,7 @@ static pthread_t g_load_thread;
 static volatile int g_load_thread_running = 0;
 
 /* Audio ring buffer (44.1kHz stereo output) */
-#define AUDIO_RING_SIZE 2048
+#define AUDIO_RING_SIZE 192
 static int16_t g_audio_ring[AUDIO_RING_SIZE * 2];
 static volatile int g_ring_write = 0;
 static volatile int g_ring_read = 0;
