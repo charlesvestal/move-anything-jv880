@@ -24,24 +24,37 @@ export function drawBrowser() {
     const mode = state.mode || 'patch';
     const patchName = state.patchName || '---';
     const bankName = state.bankName || 'JV-880';
-    const currentPreset = state.currentPreset || 0;
-    const totalPatches = state.totalPatches || 128;
+    const bankScrollOffset = state.bankScrollOffset || 0;
+    const patchInBank = state.patchInBank || 1;
     const selectedTone = state.selectedTone || 0;
     const selectedPart = state.selectedPart || 0;
     const toneEnabled = state.toneEnabled || [1, 1, 1, 1];
-    const octaveTranspose = state.octaveTranspose || 0;
 
     clear_screen();
 
-    /* Line 1: Mode and bank info */
+    /* Line 1: Mode and bank info with scrolling support */
     const modeLabel = mode === 'performance' ? 'PERF' : 'PATCH';
-    const presetNum = currentPreset + 1;
-    const headerLine = `${modeLabel}  ${bankName}`;
-    print(2, 2, headerLine, 1);
+    const charWidth = 6;
 
-    /* Right side: preset number */
-    const presetStr = `#${presetNum}`;
-    const presetX = SCREEN_WIDTH - (presetStr.length * 6) - 2;
+    /* Format preset number (3 digits max for banks up to 256) */
+    const presetStr = `#${patchInBank}`;
+    const presetX = SCREEN_WIDTH - (presetStr.length * charWidth) - 2;
+
+    /* Calculate available space for bank name */
+    const modeWidth = (modeLabel.length + 2) * charWidth;  /* mode + 2 spaces */
+    const availableWidth = presetX - modeWidth - 4;  /* 4px padding */
+    const maxBankChars = Math.floor(availableWidth / charWidth);
+
+    /* Apply scroll offset and truncate bank name */
+    let displayBank = bankName;
+    if (bankName.length > maxBankChars) {
+        displayBank = bankName.substring(bankScrollOffset, bankScrollOffset + maxBankChars);
+    }
+
+    /* Draw mode label */
+    print(2, 2, `${modeLabel}  ${displayBank}`, 1);
+
+    /* Draw preset number (right-aligned) */
     print(presetX, 2, presetStr, 1);
 
     /* Divider line */
