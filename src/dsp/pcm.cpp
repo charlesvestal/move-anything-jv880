@@ -474,7 +474,7 @@ void Pcm::PCM_Update(uint64_t cycles)
                 orval | (shifter & noise_mask), 0);
 
             // if (pcm.config_reg_3c & 0x40) // oversampling
-            if (true) // oversampling
+            if (false) // oversampling disabled - use 32kHz base rate
             {
                 pcm.ram2[30][10] = shifter;
 
