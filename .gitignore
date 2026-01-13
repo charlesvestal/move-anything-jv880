@@ -1,5 +1,6 @@
 build/
 dist/
+/jv880-module.tar.gz
 *.o
 *.so
 .DS_Store
