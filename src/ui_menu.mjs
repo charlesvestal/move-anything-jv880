@@ -234,6 +234,7 @@ function getPartMenu(partIndex) {
     const setParam = state.setParam || (() => {});
 
     return [
+        createSubmenu('Patch', () => getPartPatchMenu(partIndex)),
         createToggle('Internal', {
             get: () => !!getParam('part', 'internalswitch', partIndex),
             set: (v) => setParam('part', 'internalswitch', v ? 1 : 0, partIndex)
@@ -306,6 +307,41 @@ function formatNote(n) {
     const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     const octave = Math.floor(n / 12) - 1;
     return `${notes[n % 12]}${octave}`;
+}
+
+/* === Part Patch Selection Menu === */
+function getPartPatchMenu(partIndex) {
+    const state = getState();
+    const banks = state.getBanks ? state.getBanks() : [];
+    const setParam = state.setParam || (() => {});
+
+    return [
+        ...banks.map(bank =>
+            createSubmenu(bank.name, () => getPartPatchListMenu(partIndex, bank.id))
+        ),
+        createBack()
+    ];
+}
+
+function getPartPatchListMenu(partIndex, bankId) {
+    const state = getState();
+    const patches = state.getPatchesInBank ? state.getPatchesInBank(bankId) : [];
+    const setParam = state.setParam || (() => {});
+    const getPatchNumBase = state.getPatchNumBase || (() => 0);
+
+    return [
+        ...patches.map((patch, index) =>
+            createAction(`${index + 1}: ${patch.name}`, () => {
+                /* JV-880 patchnumber encoding:
+                 * 0-63 = Internal, 64-127 = Card, 128-191 = Preset A, 192-255 = Preset B
+                 * Get the base for this bank and add the patch position */
+                const base = getPatchNumBase(bankId);
+                const patchNumber = base + index;
+                setParam('part', 'patchnumber', patchNumber, partIndex);
+            })
+        ),
+        createBack()
+    ];
 }
 
 /* === All Parts Menu === */
