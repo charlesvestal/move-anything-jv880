@@ -36,7 +36,7 @@ Line 4: Clk:Browse  Menu:Edit
 | **Menu Button** | Open Edit menu directly |
 | **Left/Right** | Previous/next patch |
 | **Shift + Left/Right** | Previous/next bank |
-| **Back Button** | Toggle Patch/Performance mode |
+| **Capture Button** | Toggle Patch/Performance mode |
 | **Encoders 1-8** | Macro controls (see below) |
 | **Touch Encoder** | Show current value (3 sec minimum) |
 | **Track Buttons 1-4** | Select Tone 1-4 |
@@ -70,7 +70,7 @@ Touch an encoder to see its current value. Turn to adjust.
 | 4 | Release | Tone amp envelope |
 | 5 | LFO Rate | Tone LFO1 |
 | 6 | LFO Depth | Tone LFO1 filter depth |
-| 7 | Reverb Send | Tone output |
+| 7 | FX Send | Tone reverb send |
 | 8 | Level | Tone amp |
 
 ### Performance Mode Macros (affect selected Part)
@@ -104,9 +104,10 @@ Touch an encoder to see its current value. Turn to adjust.
 - **Settings** - Octave, local control, MIDI monitor, SysEx RX
 
 ### Edit Menu - Performance Mode (Menu Button)
-- **Part 1-8** - Part-level editing (see Part Submenu below)
-- **Common** - Performance common settings (reverb, chorus, key mode)
 - **Expansion Card** - Select which expansion is loaded for Card patches (64-127)
+- **Common** - Performance common settings (reverb, chorus, key mode)
+- **Part X Edit** - Edit the currently selected part (see Part Submenu below)
+- **All Parts** - Submenu to access any part directly
 - **Save** - Save performance to Internal slots 1-16
 - **Settings** - Octave, local control, MIDI monitor, SysEx RX
 
@@ -122,14 +123,16 @@ Touch an encoder to see its current value. Turn to adjust.
 - **Output/FX** - Dry level, reverb/chorus sends
 
 ### Part Submenu (Performance Mode)
+- **Patch** - Select patch for this part by bank
+- **Internal** - Toggle internal sound on/off
 - **Level** - Part volume (0-127)
 - **Pan** - Part pan (0-127, 64=center)
 - **Coarse Tune** - Transpose in semitones (±48)
 - **Fine Tune** - Detune in cents (±50)
-- **Patch** - Select patch for this part by bank
-- **Key Range** - Lower and upper key limits
-- **Velocity** - Sensitivity and max velocity
-- **Switches** - Reverb/Chorus/Receive on/off
+- **Reverb** - Toggle reverb send on/off
+- **Chorus** - Toggle chorus send on/off
+- **Key Range** - Submenu with lower and upper key limits
+- **Velocity** - Submenu with sensitivity and max velocity
 
 ## Patch Mode vs Performance Mode
 

@@ -20,7 +20,9 @@ This document tracks the work needed to fully support performance editing and pa
 
 **Not Working:**
 - Patch saving to permanent storage
-- Some packed switch bit fields (transmitswitch, internalswitch, etc.)
+- Some packed switch bit fields (transmitswitch, receiveswitch, outputselect, transmitchannel, receivechannel)
+
+**Note:** internalswitch, reverbswitch, and chorusswitch ARE working (decoded from packed bytes).
 
 ## SysEx Address Map (from Edisyn)
 

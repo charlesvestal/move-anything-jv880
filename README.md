@@ -24,8 +24,8 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 - Multiple SR-JV80 expansion card support (sorted alphabetically for easy browsing)
 - Menu-driven parameter editing with real-time value display
 - Encoder macros for quick sound shaping:
-  - Patch mode: Cutoff, Resonance, Attack, Release, LFO, Level
-  - Performance mode: Level, Pan, Tune, Key Range, Velocity
+  - Patch mode: Cutoff, Resonance, Attack, Release, LFO Rate, LFO Depth, FX Send, Level
+  - Performance mode: Level, Pan, Coarse/Fine Tune, Key Range, Velocity
 - Touch-sensitive encoders show current parameter values
 - Full Patch mode editing (all 4 tones with complete parameter access)
 - Full Performance mode editing:
@@ -108,7 +108,7 @@ JV-880 works both as a standalone module and as a sound generator in Signal Chai
 ## Current Limitations
 
 - **Patch saving**: Patch edits affect the temporary working patch but cannot be saved to Internal bank yet.
-- **Some packed parameters**: A few switch parameters in performances use packed bit fields that aren't fully decoded yet.
+- **Some packed parameters**: A few part parameters (transmit/receive switches, output select, MIDI channel routing) aren't exposed in the UI yet.
 
 ## Performance
 
