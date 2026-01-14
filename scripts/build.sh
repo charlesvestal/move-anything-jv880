@@ -72,9 +72,15 @@ cat src/jv880_sysex.mjs > dist/jv880/jv880_sysex.mjs
 cat build/dsp.so > dist/jv880/dsp.so
 chmod +x dist/jv880/dsp.so
 
+# Create tarball for release
+cd dist
+tar -czvf jv880-module.tar.gz jv880/
+cd ..
+
 echo ""
 echo "=== Build Complete ==="
 echo "Output: dist/jv880/"
+echo "Tarball: dist/jv880-module.tar.gz"
 echo ""
 echo "To install on Move:"
 echo "  ./scripts/install.sh"
