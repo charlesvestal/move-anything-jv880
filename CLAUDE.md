@@ -34,14 +34,32 @@ Implements Move Anything plugin_api_v1:
 
 ### Expansion ROM Support
 
-- Expansions in `roms/expansions/` with "SR-JV80" in filename
+- Expansions in `roms/expansions/` with "SR-JV80" in filename (case-insensitive .bin/.BIN)
+- Sorted alphabetically by name for consistent ordering
 - Auto-unscrambled on first load
 - Patch cache (`patch_cache.bin`) speeds subsequent loads
 - On-demand loading: expansion data loaded only when patch selected
+- Bank pages for >64 patch expansions (select patches 1-64, 65-128, etc.)
 
 ### Threading Model
 
 Background thread runs emulator at accelerated rate to fill audio ring buffer. Main thread pulls from buffer during render_block.
+
+### Performance Mode
+
+- Temp performance stored at SRAM offset 0x206a (204 bytes)
+- Part data at offset 28 with 22-byte stride per part
+- Supports reading/writing part parameters (level, pan, tune, patch, key range, velocity)
+- Performances saved to NVRAM Internal slots (0x00b0, 16 slots × 204 bytes)
+- Expansion card selection determines which expansion provides Card patches (patchnumber 64-127)
+
+### Mode-Specific UI
+
+- Patch mode: Track buttons 1-4 select tones (LEDs show enabled/selected)
+- Performance mode: Track buttons disabled (LEDs off), Step buttons 1-8 select parts
+- Encoder macros differ by mode:
+  - Patch: Cutoff, Resonance, Attack, Release, LFO Rate, LFO Depth, Reverb, Level
+  - Performance: Level, Pan, Coarse Tune, Fine Tune, Key Range Lo/Hi, Velocity Sense/Max
 
 ## ROM Requirements
 

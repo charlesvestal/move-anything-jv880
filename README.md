@@ -21,11 +21,17 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 ## Features
 
 - Full JV-880 emulation with 192 internal patches
-- Multiple SR-JV80 expansion card support
+- Multiple SR-JV80 expansion card support (sorted alphabetically for easy browsing)
 - Menu-driven parameter editing with real-time value display
-- Encoder macros for quick sound shaping (Cutoff, Resonance, Attack, Release, etc.)
+- Encoder macros for quick sound shaping:
+  - Patch mode: Cutoff, Resonance, Attack, Release, LFO, Level
+  - Performance mode: Level, Pan, Tune, Key Range, Velocity
 - Touch-sensitive encoders show current parameter values
-- Patch and Performance mode browsing
+- Full Patch mode editing (all 4 tones with complete parameter access)
+- Full Performance mode editing:
+  - Part parameters (level, pan, tune, key range, velocity, patch selection)
+  - Save performances to 16 Internal slots
+  - Select expansion card for Card patches (with bank pages for >64 patch expansions)
 
 ## Prerequisites
 
@@ -101,8 +107,8 @@ JV-880 works both as a standalone module and as a sound generator in Signal Chai
 
 ## Current Limitations
 
-- **Performance mode editing**: Part-level parameters (level, pan, MIDI channel) cannot be read from the emulator. Performance browsing and selection works, but editing shows placeholder menus.
-- **Patch mode editing**: Fully supported with real-time parameter reading from NVRAM.
+- **Patch saving**: Patch edits affect the temporary working patch but cannot be saved to Internal bank yet.
+- **Some packed parameters**: A few switch parameters in performances use packed bit fields that aren't fully decoded yet.
 
 ## Performance
 

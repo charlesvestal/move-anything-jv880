@@ -10,11 +10,17 @@ This document tracks the work needed to fully support performance editing and pa
 - Patch browsing and loading from ROM
 - Performance browsing and loading
 - Performance name reading from ROM2/NVRAM
+- Performance parameter reading (temp performance at SRAM 0x206a)
+- Performance common editing (reverb, chorus, key mode)
+- Part editing (level, pan, tune, key range, velocity, patch selection)
+- Performance saving to Internal slots (16 slots, persisted to NVRAM)
+- Expansion card selection for performances (with bank pages for >64 patches)
+- Mode-specific UI controls (track buttons, encoder macros)
+- Alphabetically sorted expansion listing
 
 **Not Working:**
-- Performance parameter reading/writing (common + part params)
 - Patch saving to permanent storage
-- Performance saving to permanent storage
+- Some packed switch bit fields (transmitswitch, internalswitch, etc.)
 
 ## SysEx Address Map (from Edisyn)
 

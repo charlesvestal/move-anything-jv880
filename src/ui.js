@@ -49,7 +49,7 @@ const SCREEN_WIDTH = 128;
 const SCREEN_HEIGHT = 64;
 
 /* LED colors for 5-state system */
-const LED_OFF = DarkGrey;
+const LED_OFF = 0;  /* Velocity 0 = LED completely off */
 const LED_GREY = LightGrey;        /* Muted, not selected */
 const LED_WHITE = White;           /* Muted, selected */
 const LED_DIM_GREEN = ForestGreen; /* Enabled, not selected */

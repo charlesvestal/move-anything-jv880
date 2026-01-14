@@ -60,6 +60,8 @@ Line 4: Clk:Browse  Menu:Edit
 
 Touch an encoder to see its current value. Turn to adjust.
 
+### Patch Mode Macros (affect selected Tone)
+
 | Encoder | Parameter | Scope |
 |---------|-----------|-------|
 | 1 | Cutoff | Tone filter |
@@ -71,9 +73,23 @@ Touch an encoder to see its current value. Turn to adjust.
 | 7 | Reverb Send | Tone output |
 | 8 | Level | Tone amp |
 
+### Performance Mode Macros (affect selected Part)
+
+| Encoder | Parameter | Scope |
+|---------|-----------|-------|
+| 1 | Level | Part volume |
+| 2 | Pan | Part pan |
+| 3 | Coarse Tune | Part transpose |
+| 4 | Fine Tune | Part detune |
+| 5 | Key Range Low | Part key range |
+| 6 | Key Range High | Part key range |
+| 7 | Velocity Sense | Part velocity response |
+| 8 | Velocity Max | Part max velocity |
+
 - Encoders have acceleration: slow turn = fine control, fast turn = coarse
 - Hold **Shift** while turning for fine adjustment (±1 steps)
-- Macros affect the currently selected tone
+- Track buttons 1-4 select tones in Patch mode (disabled in Performance mode)
+- Step buttons 1-8 select parts in Performance mode
 
 ## Menu Structure
 
@@ -81,13 +97,20 @@ Touch an encoder to see its current value. Turn to adjust.
 - **Browse Patches** (in Patch mode) - Navigate by bank, select patches
 - **Browse Performances** (in Performance mode) - Navigate performance banks
 
-### Edit Menu (Menu Button)
+### Edit Menu - Patch Mode (Menu Button)
 - **Common** - Patch-level settings (level, pan, portamento, bend range)
 - **Tone 1-4** - Individual tone editing
 - **Effects** - Reverb and chorus settings
 - **Settings** - Octave, local control, MIDI monitor, SysEx RX
 
-### Tone Submenu
+### Edit Menu - Performance Mode (Menu Button)
+- **Part 1-8** - Part-level editing (see Part Submenu below)
+- **Common** - Performance common settings (reverb, chorus, key mode)
+- **Expansion Card** - Select which expansion is loaded for Card patches (64-127)
+- **Save** - Save performance to Internal slots 1-16
+- **Settings** - Octave, local control, MIDI monitor, SysEx RX
+
+### Tone Submenu (Patch Mode)
 - **Enable** - Tone on/off
 - **Wave Group** - INT-A, INT-B, PCM, EXP-A/B/C/D
 - **Wave Number** - 0-255
@@ -98,24 +121,39 @@ Touch an encoder to see its current value. Turn to adjust.
 - **LFO 1/2** - Rate, delay, fade, modulation depths
 - **Output/FX** - Dry level, reverb/chorus sends
 
+### Part Submenu (Performance Mode)
+- **Level** - Part volume (0-127)
+- **Pan** - Part pan (0-127, 64=center)
+- **Coarse Tune** - Transpose in semitones (±48)
+- **Fine Tune** - Detune in cents (±50)
+- **Patch** - Select patch for this part by bank
+- **Key Range** - Lower and upper key limits
+- **Velocity** - Sensitivity and max velocity
+- **Switches** - Reverb/Chorus/Receive on/off
+
 ## Patch Mode vs Performance Mode
 
-Toggle between modes using the **Back button** in browser mode.
+Toggle between modes using the **Capture button** in browser mode.
 
 **Patch Mode**:
 - Single patch on MIDI channel 1
 - 192 internal patches + expansion patches
 - Full editing of all 4 tones
 - Browse by bank: Preset A, Preset B, Internal, Expansions
-- Track buttons 1-4 select Tone 1-4
+- Track buttons 1-4 select Tone 1-4 (LEDs show enabled/selected state)
+- Encoder macros control tone parameters (Cutoff, Resonance, etc.)
 
 **Performance Mode**:
 - 8 parts on MIDI channels 1-8
 - 48 performances (3 banks × 16)
 - Step buttons 1-8 select Part 1-8
 - Shift + Step toggles part mute
-- **Browse only** - editing not available (switch to Patch mode to edit)
+- Track buttons disabled (LEDs off)
+- Encoder macros control part parameters (Level, Pan, Tune, etc.)
 - Part 8 is the Rhythm part
+- Full part editing via Edit menu (level, pan, tune, key range, velocity, patch selection)
+- Save performances to 16 Internal slots
+- Select expansion card for Card patches (patchnumber 64-127)
 
 ## Parameter Editing
 
@@ -181,17 +219,17 @@ All parameters below can be read directly from the emulator and display their ac
 
 ## Known Limitations
 
-### Performance Mode Editing
-Performance editing is not available. The emulator's NVRAM layout for performance data is unknown. You can:
-- Browse and select performances
-- Use Patch mode for full editing capability
-- The Edit menu in Performance mode only provides Settings access
+### Saving Patches
+Patch saving to Internal bank is not yet implemented. Edits affect the temporary working patch but are not persisted to NVRAM.
+
+### Performance Saving
+Performances CAN be saved to the 16 Internal slots. Use Edit → Save in Performance mode.
+
+### Expansion Cards in Performances
+Each performance can use one expansion card at a time for Card patches (patchnumber 64-127). This matches real hardware behavior. Use Edit → Expansion Card to select which expansion is loaded. Expansions with more than 64 patches show sub-bank options (patches 1-64, 65-128, etc.).
 
 ### Parameter Reading
-Parameters are read from NVRAM when a patch is loaded. If you edit via external SysEx, the display may not update until you reload the patch.
-
-### Saving Patches
-Patch saving is not yet implemented. Edits affect the temporary working patch but are not persisted to NVRAM.
+Parameters are read from NVRAM/SRAM when a patch or performance is loaded. If you edit via external SysEx, the display may not update until you reload.
 
 ## Troubleshooting
 
