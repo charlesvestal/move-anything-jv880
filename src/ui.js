@@ -12,7 +12,7 @@ import {
     BrightGreen, BrightRed, DarkGrey, LightGrey, White, ForestGreen,
     MoveMainKnob, MoveMainButton,
     MoveLeft, MoveRight, MoveUp, MoveDown,
-    MoveShift, MoveMenu, MoveBack, MoveMute,
+    MoveShift, MoveMenu, MoveBack, MoveMute, MoveCapture,
     MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4,
     MoveKnob5, MoveKnob6, MoveKnob7, MoveKnob8,
     MoveRow1, MoveRow2, MoveRow3, MoveRow4,
@@ -65,6 +65,7 @@ const CC_SHIFT = MoveShift;
 const CC_MENU = MoveMenu;
 const CC_BACK = MoveBack;
 const CC_MUTE = MoveMute;
+const CC_CAPTURE = MoveCapture;
 
 const ENCODER_CCS = [
     MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4,
@@ -446,15 +447,9 @@ function updateStepLEDs() {
 function updateButtonLEDs() {
     setButtonLED(CC_MENU, uiMode === 'menu' ? LED_BRIGHT_GREEN : LED_GREY, true);
     setButtonLED(CC_BACK, LED_GREY, true);
-
-    /* MUTE button: Red when selected tone/part is muted */
-    let isMuted = false;
-    if (mode === 'patch') {
-        isMuted = !toneEnabled[selectedTone];
-    } else {
-        isMuted = !partEnabled[selectedPart];
-    }
-    setButtonLED(CC_MUTE, isMuted ? BrightRed : LED_GREY, true);
+    /* Capture button: lit when in performance mode */
+    setButtonLED(CC_CAPTURE, mode === 'performance' ? LED_BRIGHT_GREEN : LED_GREY, true);
+    setButtonLED(CC_MUTE, LED_GREY, true);
 }
 
 function setStepLED(index, color) {
@@ -602,8 +597,8 @@ function handleCC(cc, value) {
         return true;
     }
 
-    if (cc === CC_BACK && value > 0) {
-        /* Toggle mode in browser */
+    if (cc === CC_CAPTURE && value > 0) {
+        /* Toggle mode in browser (capture button) */
         setMode(mode === 'patch' ? 'performance' : 'patch');
         return true;
     }

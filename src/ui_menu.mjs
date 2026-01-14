@@ -128,12 +128,182 @@ function getEditPatchMenu() {
 }
 
 function getEditPerformanceMenu() {
-    /* Performance editing not yet supported - NVRAM layout unknown */
-    /* See docs/TODO-performance-editing.md for implementation plan */
+    const state = getState();
+    const selectedPart = state.selectedPart ?? 0;
+
     return [
-        createAction('Performance edit not supported', () => {}),
-        createAction('Use Patch mode for editing', () => {}),
+        createSubmenu('Common', () => getPerformanceCommonMenu()),
+        createSubmenu(`Part ${selectedPart + 1} Edit`, () => getPartMenu(selectedPart)),
+        createSubmenu('All Parts', () => getAllPartsMenu()),
         createSubmenu('Settings', () => getSettingsMenu()),
+        createBack()
+    ];
+}
+
+/* === Performance Common Menu === */
+function getPerformanceCommonMenu() {
+    const state = getState();
+    const getParam = state.getParam || (() => 0);
+    const setParam = state.setParam || (() => {});
+
+    return [
+        createEnum('Key Mode', {
+            get: () => getParam('performanceCommon', 'keymode'),
+            set: (v) => setParam('performanceCommon', 'keymode', v),
+            options: ['Layer', 'Zone', 'Single']
+        }),
+        createSubmenu('Reverb', () => [
+            createEnum('Type', {
+                get: () => getParam('performanceCommon', 'reverbtype'),
+                set: (v) => setParam('performanceCommon', 'reverbtype', v),
+                options: ['Room1', 'Room2', 'Stage1', 'Stage2', 'Hall1', 'Hall2', 'Delay', 'Pan-Delay']
+            }),
+            createValue('Level', {
+                get: () => getParam('performanceCommon', 'reverblevel'),
+                set: (v) => setParam('performanceCommon', 'reverblevel', v),
+                min: 0, max: 127
+            }),
+            createValue('Time', {
+                get: () => getParam('performanceCommon', 'reverbtime'),
+                set: (v) => setParam('performanceCommon', 'reverbtime', v),
+                min: 0, max: 127
+            }),
+            createValue('Feedback', {
+                get: () => getParam('performanceCommon', 'reverbfeedback'),
+                set: (v) => setParam('performanceCommon', 'reverbfeedback', v),
+                min: 0, max: 127
+            }),
+            createBack()
+        ]),
+        createSubmenu('Chorus', () => [
+            createEnum('Type', {
+                get: () => getParam('performanceCommon', 'chorustype'),
+                set: (v) => setParam('performanceCommon', 'chorustype', v),
+                options: ['Chorus1', 'Chorus2', 'Chorus3', 'Chorus4', 'Feedback', 'Flanger', 'Delay', 'Delay FB']
+            }),
+            createValue('Level', {
+                get: () => getParam('performanceCommon', 'choruslevel'),
+                set: (v) => setParam('performanceCommon', 'choruslevel', v),
+                min: 0, max: 127
+            }),
+            createValue('Depth', {
+                get: () => getParam('performanceCommon', 'chorusdepth'),
+                set: (v) => setParam('performanceCommon', 'chorusdepth', v),
+                min: 0, max: 127
+            }),
+            createValue('Rate', {
+                get: () => getParam('performanceCommon', 'chorusrate'),
+                set: (v) => setParam('performanceCommon', 'chorusrate', v),
+                min: 0, max: 127
+            }),
+            createValue('Feedback', {
+                get: () => getParam('performanceCommon', 'chorusfeedback'),
+                set: (v) => setParam('performanceCommon', 'chorusfeedback', v),
+                min: 0, max: 127
+            }),
+            createEnum('Output', {
+                get: () => getParam('performanceCommon', 'chorusoutput'),
+                set: (v) => setParam('performanceCommon', 'chorusoutput', v),
+                options: ['Mix', 'Rev', 'Mix+Rev']
+            }),
+            createBack()
+        ]),
+        createBack()
+    ];
+}
+
+/* === Part Menu === */
+function getPartMenu(partIndex) {
+    const state = getState();
+    const getParam = state.getParam || (() => 0);
+    const setParam = state.setParam || (() => {});
+
+    return [
+        createToggle('Internal', {
+            get: () => !!getParam('part', 'internalswitch', partIndex),
+            set: (v) => setParam('part', 'internalswitch', v ? 1 : 0, partIndex)
+        }),
+        createValue('Level', {
+            get: () => getParam('part', 'partlevel', partIndex),
+            set: (v) => setParam('part', 'partlevel', v, partIndex),
+            min: 0, max: 127
+        }),
+        createValue('Pan', {
+            get: () => getParam('part', 'partpan', partIndex),
+            set: (v) => setParam('part', 'partpan', v, partIndex),
+            min: 0, max: 127,
+            format: (v) => v === 64 ? 'C' : (v < 64 ? `L${64 - v}` : `R${v - 64}`)
+        }),
+        createValue('Coarse Tune', {
+            get: () => getParam('part', 'partcoarsetune', partIndex),
+            set: (v) => setParam('part', 'partcoarsetune', v, partIndex),
+            min: 16, max: 112,
+            format: (v) => `${v - 64 >= 0 ? '+' : ''}${v - 64}`
+        }),
+        createValue('Fine Tune', {
+            get: () => getParam('part', 'partfinetune', partIndex),
+            set: (v) => setParam('part', 'partfinetune', v, partIndex),
+            min: 14, max: 114,
+            format: (v) => `${v - 64 >= 0 ? '+' : ''}${v - 64}`
+        }),
+        createToggle('Reverb', {
+            get: () => !!getParam('part', 'reverbswitch', partIndex),
+            set: (v) => setParam('part', 'reverbswitch', v ? 1 : 0, partIndex)
+        }),
+        createToggle('Chorus', {
+            get: () => !!getParam('part', 'chorusswitch', partIndex),
+            set: (v) => setParam('part', 'chorusswitch', v ? 1 : 0, partIndex)
+        }),
+        createSubmenu('Key Range', () => [
+            createValue('Lower', {
+                get: () => getParam('part', 'internalkeyrangelower', partIndex),
+                set: (v) => setParam('part', 'internalkeyrangelower', v, partIndex),
+                min: 0, max: 127,
+                format: formatNote
+            }),
+            createValue('Upper', {
+                get: () => getParam('part', 'internalkeyrangeupper', partIndex),
+                set: (v) => setParam('part', 'internalkeyrangeupper', v, partIndex),
+                min: 0, max: 127,
+                format: formatNote
+            }),
+            createBack()
+        ]),
+        createSubmenu('Velocity', () => [
+            createValue('Sense', {
+                get: () => getParam('part', 'internalvelocitysense', partIndex),
+                set: (v) => setParam('part', 'internalvelocitysense', v, partIndex),
+                min: 0, max: 127
+            }),
+            createValue('Max', {
+                get: () => getParam('part', 'internalvelocitymax', partIndex),
+                set: (v) => setParam('part', 'internalvelocitymax', v, partIndex),
+                min: 1, max: 127
+            }),
+            createBack()
+        ]),
+        createBack()
+    ];
+}
+
+/* Note name formatter */
+function formatNote(n) {
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(n / 12) - 1;
+    return `${notes[n % 12]}${octave}`;
+}
+
+/* === All Parts Menu === */
+function getAllPartsMenu() {
+    return [
+        createSubmenu('Part 1', () => getPartMenu(0)),
+        createSubmenu('Part 2', () => getPartMenu(1)),
+        createSubmenu('Part 3', () => getPartMenu(2)),
+        createSubmenu('Part 4', () => getPartMenu(3)),
+        createSubmenu('Part 5', () => getPartMenu(4)),
+        createSubmenu('Part 6', () => getPartMenu(5)),
+        createSubmenu('Part 7', () => getPartMenu(6)),
+        createSubmenu('Part 8', () => getPartMenu(7)),
         createBack()
     ];
 }
