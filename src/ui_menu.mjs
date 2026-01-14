@@ -135,6 +135,7 @@ function getEditPerformanceMenu() {
         createSubmenu('Common', () => getPerformanceCommonMenu()),
         createSubmenu(`Part ${selectedPart + 1} Edit`, () => getPartMenu(selectedPart)),
         createSubmenu('All Parts', () => getAllPartsMenu()),
+        createSubmenu('Save', () => getSavePerformanceMenu()),
         createSubmenu('Settings', () => getSettingsMenu()),
         createSubmenu('Debug', () => [
             createAction('Dump Part Values', () => {
@@ -355,6 +356,23 @@ function getAllPartsMenu() {
         createSubmenu('Part 6', () => getPartMenu(5)),
         createSubmenu('Part 7', () => getPartMenu(6)),
         createSubmenu('Part 8', () => getPartMenu(7)),
+        createBack()
+    ];
+}
+
+/* === Save Performance Menu === */
+function getSavePerformanceMenu() {
+    const slots = [];
+    for (let i = 0; i < 16; i++) {
+        slots.push(
+            createAction(`Internal ${i + 1}`, () => {
+                host_module_set_param(`write_performance_${i}`, '1');
+                host_module_set_param('save_nvram', '1');
+            })
+        );
+    }
+    return [
+        ...slots,
         createBack()
     ];
 }

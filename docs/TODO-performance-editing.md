@@ -157,18 +157,54 @@ Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where te
 - [ ] Add DSP handlers for switch parameters once bit layout known
 
 ### 3. Implement Patch Saving
+**Current state:** Edits only affect temp patch at NVRAM 0x0d70. Nothing persists.
+
 Options to investigate:
 - [ ] **Option A**: Write directly to NVRAM storage locations and save NVRAM file
+  - Copy temp patch (0x0d70, 362 bytes) to Internal slot (0x008ce0 + slot*362 in ROM2 area?)
+  - Need to find actual NVRAM locations for user patches
 - [ ] **Option B**: Send "Write to Internal" SysEx command (if emulator supports it)
 - [ ] **Option C**: Trigger emulator's internal save mechanism
 
 ### 4. Implement Performance Saving
-- [ ] Same as patch saving, but for performance slots
+**Current state:** Basic implementation complete.
+
+- [x] Copy temp performance (SRAM 0x206a, 204 bytes) to Internal slot (NVRAM 0x00b0 + slot*204)
+  - `write_performance_<0-15>` DSP command implemented
+- [x] Add "Write Performance" UI action
+  - Save submenu in Performance Edit with 16 Internal slots
+- [x] NVRAM file persistence
+  - Saves NVRAM immediately after writing performance
 
 ### 5. NVRAM Persistence
-- [ ] Add DSP command to save current NVRAM to file
-- [ ] Call on module unload or explicit save action
-- [ ] Load NVRAM on startup (already implemented)
+- [x] Add DSP command to save current NVRAM to file (`save_nvram`)
+- [x] Call after explicit save action (Save menu triggers it)
+- [x] Load NVRAM on startup (already implemented)
+- [ ] Auto-save on module unload (not yet implemented)
+
+### 6. Expansion + Performance Compatibility (CRITICAL LIMITATION)
+
+**Problem:** JV-880 hardware has only one expansion card slot. Our emulator loads multiple expansions but only one can be "active" in the emulator at a time.
+
+**Current behavior:**
+- Selecting a patch from a different expansion triggers `load_expansion_to_emulator()`
+- This copies the expansion ROM to `waverom_exp` and resets the emulator
+- Performances reference patches by patchnumber (0-255):
+  - 0-63: Internal
+  - 64-127: Card (currently loaded expansion)
+  - 128-191: Preset A
+  - 192-255: Preset B
+
+**Consequences:**
+- A performance can only use patches from ONE expansion at a time
+- If Part 1 uses expansion A and Part 2 needs expansion B, they conflict
+- Switching expansions resets the emulator, potentially disrupting playback
+
+**Possible solutions:**
+- [ ] **Option A**: Accept hardware limitation - performances can only use one expansion
+- [ ] **Option B**: Pre-load expansion patch data into temp slots when loading performance
+- [ ] **Option C**: Implement "virtual expansion" that combines patches from multiple ROMs
+- [ ] Document limitation clearly in UI
 
 ## Resources
 

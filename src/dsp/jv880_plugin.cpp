@@ -1784,6 +1784,18 @@ static void jv880_set_param(const char *key, const char *val) {
             fclose(f);
             fprintf(stderr, "JV880: Dumped NVRAM to %s\n", path);
         }
+    } else if (strcmp(key, "save_nvram") == 0 && g_mcu) {
+        /* Save NVRAM to the standard file location */
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/roms/jv880_nvram.bin", g_module_dir);
+        FILE* f = fopen(path, "wb");
+        if (f) {
+            fwrite(g_mcu->nvram, 1, NVRAM_SIZE, f);
+            fclose(f);
+            fprintf(stderr, "JV880: Saved NVRAM to %s\n", path);
+        } else {
+            fprintf(stderr, "JV880: Failed to save NVRAM to %s\n", path);
+        }
     } else if (strcmp(key, "dump_temp_perf") == 0 && g_mcu) {
         /* Debug: dump temp performance from SRAM for analysis */
         fprintf(stderr, "JV880: === Temp Performance at SRAM 0x%04x ===\n", SRAM_TEMP_PERF_OFFSET);
@@ -1887,6 +1899,23 @@ static void jv880_set_param(const char *key, const char *val) {
             fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i]);
         }
         fprintf(stderr, "\n=== End Part Values ===\n");
+    } else if (strncmp(key, "write_performance_", 18) == 0 && g_mcu) {
+        /* Write temp performance to an Internal slot (0-15)
+         * Usage: write_performance_<slot> where slot is 0-15
+         * Copies temp performance from SRAM to NVRAM Internal slot */
+        int slot = atoi(key + 18);
+        if (slot >= 0 && slot < 16) {
+            uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (slot * PERF_SIZE);
+            memcpy(&g_mcu->nvram[nvram_offset],
+                   &g_mcu->sram[SRAM_TEMP_PERF_OFFSET], PERF_SIZE);
+            char name[13];
+            memcpy(name, &g_mcu->sram[SRAM_TEMP_PERF_OFFSET], 12);
+            name[12] = '\0';
+            fprintf(stderr, "JV880: Wrote performance '%s' to Internal slot %d (NVRAM 0x%04x)\n",
+                    name, slot + 1, nvram_offset);
+        } else {
+            fprintf(stderr, "JV880: Invalid performance slot %d (must be 0-15)\n", slot);
+        }
     }
     /* Note: tempo and clock_mode are now host settings */
 }
