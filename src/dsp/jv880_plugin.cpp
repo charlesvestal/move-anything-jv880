@@ -44,6 +44,21 @@ static uint8_t *g_rom2 = nullptr;
 #define NVRAM_PATCH_OFFSET      0x0d70
 #define NVRAM_MODE_OFFSET       0x11
 
+/* Performance data constants
+ * Performance structure is 204 bytes (0xCC)
+ * 16 performances per bank, name is first 12 bytes
+ * Preset A/B are in ROM2, Internal is in NVRAM
+ * Internal performances (16 × 0xCC = 0xCC0) end at 0x0d70 (temp patch)
+ */
+#define PERF_SIZE 0xCC   /* 204 bytes per performance */
+#define PERF_NAME_LEN 12
+#define PERFS_PER_BANK 16
+/* ROM2 offsets for preset performances */
+#define PERF_OFFSET_PRESET_A    0x10020  /* Preset A: "Jazz Split", "Softly...", etc. */
+#define PERF_OFFSET_PRESET_B    0x18020  /* Preset B: "GTR Players", etc. */
+/* NVRAM offset for internal performances */
+#define NVRAM_PERF_INTERNAL     0x00b0   /* Internal: "Syn Lead", "Encounter X", etc. */
+
 /* Expansion ROM support */
 #define EXPANSION_SIZE_8MB 0x800000  /* 8MB standard */
 #define EXPANSION_SIZE_2MB 0x200000  /* 2MB (Experience series) */
@@ -897,6 +912,17 @@ static void select_part(int part_index) {
 
 /* Get current bank name for display */
 static const char* get_current_bank_name(void) {
+    if (g_performance_mode) {
+        /* Performance mode - return performance bank name */
+        static const char* perf_bank_names[] = {"Preset A", "Preset B", "Internal"};
+        int bank = g_current_performance / PERFS_PER_BANK;
+        if (bank >= 0 && bank < NUM_PERF_BANKS) {
+            return perf_bank_names[bank];
+        }
+        return "JV-880";
+    }
+
+    /* Patch mode */
     if (g_current_patch < 0 || g_current_patch >= g_total_patches) {
         return "JV-880";
     }
@@ -1373,29 +1399,43 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         return 1;
     }
     if (strcmp(key, "patch_name") == 0 || strcmp(key, "preset_name") == 0) {
-        /* In performance mode, return the performance name from LCD line 0
-         * which shows something like "PA:01 Perf Name" or "INT:01 Perf Name"
-         */
-        if (g_performance_mode && g_mcu) {
-            const char* lcd_line = g_mcu->lcd.GetLine(0);
-            /* Skip bank prefix (e.g., "PA:01 " or "INT:01 ") - find first space after colon */
-            const char* name_start = lcd_line;
-            const char* colon = strchr(lcd_line, ':');
-            if (colon) {
-                const char* space = strchr(colon, ' ');
-                if (space) {
-                    name_start = space + 1;
+        if (g_performance_mode) {
+            /* In performance mode, read name from ROM2/NVRAM */
+            int idx = g_current_performance;
+            if (idx >= 0 && idx < NUM_PERFORMANCES) {
+                int bank = idx / PERFS_PER_BANK;
+                int perf_in_bank = idx % PERFS_PER_BANK;
+                uint8_t name_buf[PERF_NAME_LEN + 1];
+                memset(name_buf, 0, sizeof(name_buf));
+                int got_name = 0;
+
+                if (bank == 2 && g_mcu) {
+                    /* Internal - read from NVRAM */
+                    uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (perf_in_bank * PERF_SIZE);
+                    if (nvram_offset + PERF_NAME_LEN <= 0x8000) {
+                        memcpy(name_buf, &g_mcu->nvram[nvram_offset], PERF_NAME_LEN);
+                        got_name = 1;
+                    }
+                } else if (g_rom2) {
+                    /* Preset A/B - read from ROM2 */
+                    uint32_t offset = (bank == 0) ? PERF_OFFSET_PRESET_A : PERF_OFFSET_PRESET_B;
+                    offset += perf_in_bank * PERF_SIZE;
+                    if (offset + PERF_NAME_LEN <= 0x40000) {
+                        memcpy(name_buf, &g_rom2[offset], PERF_NAME_LEN);
+                        got_name = 1;
+                    }
+                }
+
+                if (got_name) {
+                    /* Trim trailing spaces */
+                    int len = PERF_NAME_LEN;
+                    while (len > 0 && (name_buf[len - 1] == ' ' || name_buf[len - 1] == 0)) len--;
+                    name_buf[len] = '\0';
+                    snprintf(buf, buf_len, "%s", name_buf);
+                    return 1;
                 }
             }
-            /* Trim trailing spaces */
-            int len = strlen(name_start);
-            while (len > 0 && name_start[len - 1] == ' ') len--;
-            if (len > 0 && len < buf_len) {
-                memcpy(buf, name_start, len);
-                buf[len] = '\0';
-            } else {
-                snprintf(buf, buf_len, "---");
-            }
+            snprintf(buf, buf_len, "---");
         } else if (g_current_patch >= 0 && g_current_patch < g_total_patches) {
             snprintf(buf, buf_len, "%s", g_patches[g_current_patch].name);
         } else {
@@ -1412,10 +1452,16 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         return 1;
     }
     if (strcmp(key, "patch_in_bank") == 0) {
-        /* Return 1-indexed position within current bank */
-        int bank = get_bank_for_patch(g_current_patch);
-        int pos = g_current_patch - g_bank_starts[bank] + 1;
-        snprintf(buf, buf_len, "%d", pos);
+        if (g_performance_mode) {
+            /* Return 1-indexed position within performance bank */
+            int pos = (g_current_performance % PERFS_PER_BANK) + 1;
+            snprintf(buf, buf_len, "%d", pos);
+        } else {
+            /* Return 1-indexed position within current patch bank */
+            int bank = get_bank_for_patch(g_current_patch);
+            int pos = g_current_patch - g_bank_starts[bank] + 1;
+            snprintf(buf, buf_len, "%d", pos);
+        }
         return 1;
     }
     if (strcmp(key, "loading_status") == 0) {
@@ -1465,29 +1511,63 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         return 1;
     }
     /* Query performance name by index: perf_<index>_name */
+    /* Query performance name by index: perf_<index>_name
+     * Always read from ROM2 (preset) or NVRAM (internal) - don't use LCD
+     * because LCD may show part info, not just the name */
     if (strncmp(key, "perf_", 5) == 0 && strstr(key, "_name")) {
         int idx = atoi(key + 5);
         if (idx >= 0 && idx < NUM_PERFORMANCES) {
-            /* If this is the current performance and we're in perf mode, get from LCD */
-            if (g_performance_mode && idx == g_current_performance && g_mcu) {
-                const char* lcd_line = g_mcu->lcd.GetLine(0);
-                const char* name_start = lcd_line;
-                const char* colon = strchr(lcd_line, ':');
-                if (colon) {
-                    const char* space = strchr(colon, ' ');
-                    if (space) name_start = space + 1;
+            /* Read performance name from ROM2 (preset) or NVRAM (internal) */
+            int bank = idx / PERFS_PER_BANK;
+            int perf_in_bank = idx % PERFS_PER_BANK;
+            uint8_t name_buf[PERF_NAME_LEN + 1];
+            memset(name_buf, 0, sizeof(name_buf));
+            int got_name = 0;
+
+            if (g_rom2) {
+                uint32_t offset = 0;
+                if (bank == 0) {
+                    /* Preset A - read from ROM2 */
+                    offset = PERF_OFFSET_PRESET_A + (perf_in_bank * PERF_SIZE);
+                } else if (bank == 1) {
+                    /* Preset B - read from ROM2 */
+                    offset = PERF_OFFSET_PRESET_B + (perf_in_bank * PERF_SIZE);
+                } else if (bank == 2 && g_mcu) {
+                    /* Internal - read from NVRAM */
+                    uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (perf_in_bank * PERF_SIZE);
+                    if (nvram_offset + PERF_NAME_LEN <= 0x8000) {
+                        memcpy(name_buf, &g_mcu->nvram[nvram_offset], PERF_NAME_LEN);
+                        got_name = 1;
+                    }
                 }
-                int len = strlen(name_start);
-                while (len > 0 && name_start[len - 1] == ' ') len--;
-                if (len > 0 && len < buf_len) {
-                    memcpy(buf, name_start, len);
-                    buf[len] = '\0';
+
+                if (!got_name && offset > 0 && offset + PERF_NAME_LEN <= 0x40000) {
+                    memcpy(name_buf, &g_rom2[offset], PERF_NAME_LEN);
+                    got_name = 1;
+                }
+            }
+
+            if (got_name) {
+                /* Check if name looks valid (printable ASCII) */
+                int valid = 1;
+                for (int i = 0; i < PERF_NAME_LEN && name_buf[i]; i++) {
+                    if (name_buf[i] < 0x20 || name_buf[i] > 0x7e) {
+                        valid = 0;
+                        break;
+                    }
+                }
+                if (valid && name_buf[0] >= 0x20) {
+                    /* Trim trailing spaces */
+                    int len = PERF_NAME_LEN;
+                    while (len > 0 && (name_buf[len - 1] == ' ' || name_buf[len - 1] == 0)) len--;
+                    name_buf[len] = '\0';
+                    snprintf(buf, buf_len, "%s", name_buf);
                     return 1;
                 }
             }
-            /* Bank and number labels */
-            int bank = idx / PERFS_PER_BANK;
-            int num = (idx % PERFS_PER_BANK) + 1;
+
+            /* Fallback: Bank and number labels */
+            int num = perf_in_bank + 1;
             const char* bank_names[] = {"PA", "PB", "INT"};
             snprintf(buf, buf_len, "%s:%02d", bank_names[bank], num);
             return 1;
@@ -1743,7 +1823,7 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
 }
 
 /* Output gain (reduce to prevent clipping) */
-#define OUTPUT_GAIN_SHIFT 2  /* Divide by 4 (-12dB) */
+#define OUTPUT_GAIN_SHIFT 0  /* No attenuation (0dB) */
 
 static void jv880_render_block(int16_t *out, int frames) {
     if (!g_initialized || !g_thread_running) {
