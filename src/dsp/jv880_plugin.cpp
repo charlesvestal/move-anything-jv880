@@ -58,6 +58,19 @@ static uint8_t *g_rom2 = nullptr;
 #define PERF_OFFSET_PRESET_B    0x18020  /* Preset B: "GTR Players", etc. */
 /* NVRAM offset for internal performances */
 #define NVRAM_PERF_INTERNAL     0x00b0   /* Internal: "Syn Lead", "Encounter X", etc. */
+/* SRAM offset for temp performance (discovered via scanning) */
+#define SRAM_TEMP_PERF_OFFSET   0x206a   /* Temp performance buffer in SRAM */
+
+/* Temp performance structure offsets (stored format, 204 bytes total):
+ *   0-11:  Name (12 bytes)
+ *   12:    Key mode
+ *   13-16: Reverb (type, level, time, feedback)
+ *   17-22: Chorus (type, level, depth, rate, feedback, output)
+ *   23-30: Voice reserve 1-8
+ *   31+:   Part data (8 parts × ~21 bytes each)
+ */
+#define TEMP_PERF_COMMON_SIZE   31   /* Bytes for common params (name + settings) */
+#define TEMP_PERF_PART_SIZE     21   /* Approximate bytes per part in stored format */
 
 /* Expansion ROM support */
 #define EXPANSION_SIZE_8MB 0x800000  /* 8MB standard */
@@ -844,6 +857,11 @@ static void set_mode(int performance_mode) {
             g_mcu->nvram[NVRAM_MODE_OFFSET]);
 }
 
+/* SRAM scan state for performance discovery - forward declarations */
+static int g_sram_scan_countdown = 0;
+static int g_found_perf_sram_offset = -1;
+static void scan_sram_for_performance(void);
+
 /* Select a performance (0-47 across 3 banks) */
 static void select_performance(int perf_index) {
     if (!g_mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
@@ -901,6 +919,71 @@ static void select_performance(int perf_index) {
     const char* bank_names[] = { "Preset A", "Preset B", "Internal" };
     fprintf(stderr, "JV880: Selected %s performance %d (ch16: Bank=%d PC=%d)\n",
             bank_names[g_perf_bank], perf_in_bank + 1, bank_msb, pc_value);
+
+    /* Schedule SRAM scan for performance data discovery */
+    g_sram_scan_countdown = 100;  /* Scan after 100 render cycles (~2 seconds) */
+}
+
+/* Scan SRAM for current performance name to find temp performance location */
+static void scan_sram_for_performance(void) {
+    if (!g_mcu || !g_performance_mode) return;
+
+    /* Get expected performance name from ROM/NVRAM */
+    char expected_name[16] = {0};
+    int bank = g_current_performance / PERFS_PER_BANK;
+    int perf_in_bank = g_current_performance % PERFS_PER_BANK;
+
+    if (bank == 2 && g_mcu) {
+        /* Internal - read from NVRAM */
+        uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (perf_in_bank * PERF_SIZE);
+        memcpy(expected_name, &g_mcu->nvram[nvram_offset], 12);
+    } else if (g_rom2) {
+        /* Preset A/B - read from ROM2 */
+        uint32_t offset = (bank == 0) ? PERF_OFFSET_PRESET_A : PERF_OFFSET_PRESET_B;
+        offset += perf_in_bank * PERF_SIZE;
+        memcpy(expected_name, &g_rom2[offset], 12);
+    }
+
+    /* Trim trailing spaces */
+    int name_len = 12;
+    while (name_len > 0 && expected_name[name_len - 1] == ' ') name_len--;
+    expected_name[name_len] = '\0';
+
+    fprintf(stderr, "JV880: Scanning SRAM for performance name '%s'...\n", expected_name);
+
+    /* Search for first 4+ chars of name in SRAM */
+    int search_len = (name_len >= 4) ? 4 : name_len;
+    if (search_len < 3) {
+        fprintf(stderr, "JV880: Performance name too short to search\n");
+        return;
+    }
+
+    for (int i = 0; i <= SRAM_SIZE - search_len; i++) {
+        if (memcmp(&g_mcu->sram[i], expected_name, search_len) == 0) {
+            g_found_perf_sram_offset = i;
+            fprintf(stderr, "JV880: *** FOUND '%s' in SRAM at offset 0x%04x ***\n",
+                    expected_name, i);
+
+            /* Dump 64 bytes around the match */
+            fprintf(stderr, "JV880: SRAM[0x%04x - 0x%04x]:\n", i, i + 63);
+            for (int j = 0; j < 64; j += 16) {
+                fprintf(stderr, "  %04x: ", i + j);
+                for (int k = 0; k < 16 && i + j + k < SRAM_SIZE; k++) {
+                    fprintf(stderr, "%02x ", g_mcu->sram[i + j + k]);
+                }
+                fprintf(stderr, "  |");
+                for (int k = 0; k < 16 && i + j + k < SRAM_SIZE; k++) {
+                    uint8_t c = g_mcu->sram[i + j + k];
+                    fprintf(stderr, "%c", (c >= 32 && c < 127) ? c : '.');
+                }
+                fprintf(stderr, "|\n");
+            }
+            return;
+        }
+    }
+
+    fprintf(stderr, "JV880: Performance name NOT found in SRAM\n");
+    g_found_perf_sram_offset = -1;
 }
 
 /* Select a part within the current performance (0-7) */
@@ -1373,6 +1456,26 @@ static void jv880_set_param(const char *key, const char *val) {
         if (part < 0) part = 0;
         if (part > 7) part = 7;
         select_part(part);
+    } else if (strcmp(key, "dump_sram") == 0 && g_mcu) {
+        /* Debug: dump SRAM to file for analysis */
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", g_module_dir, val);
+        FILE* f = fopen(path, "wb");
+        if (f) {
+            fwrite(g_mcu->sram, 1, SRAM_SIZE, f);
+            fclose(f);
+            fprintf(stderr, "JV880: Dumped SRAM to %s\n", path);
+        }
+    } else if (strcmp(key, "dump_nvram") == 0 && g_mcu) {
+        /* Debug: dump NVRAM to file for analysis */
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", g_module_dir, val);
+        FILE* f = fopen(path, "wb");
+        if (f) {
+            fwrite(g_mcu->nvram, 1, NVRAM_SIZE, f);
+            fclose(f);
+            fprintf(stderr, "JV880: Dumped NVRAM to %s\n", path);
+        }
     }
     /* Note: tempo and clock_mode are now host settings */
 }
@@ -1818,6 +1921,99 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
             return 1;
         }
     }
+
+    /* Read performance common parameter from SRAM temp buffer
+     * Format: sram_perfCommon_<paramName>
+     * Stored format offsets:
+     *   12: keymode, 13: reverbtype, 14: reverblevel, 15: reverbtime, 16: reverbfeedback
+     *   17: chorustype, 18: choruslevel, 19: chorusdepth, 20: chorusrate, 21: chorusfeedback, 22: chorusoutput
+     *   23-30: voicereserve1-8
+     */
+    if (strncmp(key, "sram_perfCommon_", 16) == 0 && g_mcu) {
+        const char* paramName = key + 16;
+        int offset = -1;
+
+        /* Map parameter names to stored format offsets */
+        if (strcmp(paramName, "keymode") == 0) offset = 12;
+        else if (strcmp(paramName, "reverbtype") == 0) offset = 13;
+        else if (strcmp(paramName, "reverblevel") == 0) offset = 14;
+        else if (strcmp(paramName, "reverbtime") == 0) offset = 15;
+        else if (strcmp(paramName, "reverbfeedback") == 0) offset = 16;
+        else if (strcmp(paramName, "chorustype") == 0) offset = 17;
+        else if (strcmp(paramName, "choruslevel") == 0) offset = 18;
+        else if (strcmp(paramName, "chorusdepth") == 0) offset = 19;
+        else if (strcmp(paramName, "chorusrate") == 0) offset = 20;
+        else if (strcmp(paramName, "chorusfeedback") == 0) offset = 21;
+        else if (strcmp(paramName, "chorusoutput") == 0) offset = 22;
+        else if (strcmp(paramName, "voicereserve1") == 0) offset = 23;
+        else if (strcmp(paramName, "voicereserve2") == 0) offset = 24;
+        else if (strcmp(paramName, "voicereserve3") == 0) offset = 25;
+        else if (strcmp(paramName, "voicereserve4") == 0) offset = 26;
+        else if (strcmp(paramName, "voicereserve5") == 0) offset = 27;
+        else if (strcmp(paramName, "voicereserve6") == 0) offset = 28;
+        else if (strcmp(paramName, "voicereserve7") == 0) offset = 29;
+        else if (strcmp(paramName, "voicereserve8") == 0) offset = 30;
+
+        if (offset >= 0) {
+            uint8_t val = g_mcu->sram[SRAM_TEMP_PERF_OFFSET + offset];
+            snprintf(buf, buf_len, "%d", val);
+            return 1;
+        }
+    }
+
+    /* Read part parameter from SRAM temp buffer
+     * Format: sram_part_<partIdx>_<paramName>
+     * Part data starts at offset 31, each part is ~21 bytes
+     * Stored format is compact - only key params are directly accessible:
+     *   Part offset + 0: flags/status
+     *   Part offset + 8-9: patch number (bank + number)
+     *   Part offset + 13-14: level, pan
+     */
+    if (strncmp(key, "sram_part_", 10) == 0 && g_mcu) {
+        int partIdx = key[10] - '0';
+        if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
+            const char* paramName = key + 12;
+            int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
+
+            /* The stored part format is complex - we'll expose raw bytes for now
+             * and refine once we understand the mapping better */
+            if (strcmp(paramName, "byte0") == 0) {
+                snprintf(buf, buf_len, "%d", g_mcu->sram[partBase + 0]);
+                return 1;
+            } else if (strcmp(paramName, "byte1") == 0) {
+                snprintf(buf, buf_len, "%d", g_mcu->sram[partBase + 1]);
+                return 1;
+            }
+            /* Add more as we decode the format */
+        }
+    }
+
+    /* Debug: search for string in SRAM - returns offset or -1 */
+    if (strncmp(key, "debug_find_sram_", 16) == 0 && g_mcu) {
+        const char* needle = key + 16;
+        int needle_len = strlen(needle);
+        if (needle_len > 0 && needle_len <= 12) {
+            for (int i = 0; i <= SRAM_SIZE - needle_len; i++) {
+                if (memcmp(&g_mcu->sram[i], needle, needle_len) == 0) {
+                    snprintf(buf, buf_len, "0x%04x", i);
+                    fprintf(stderr, "JV880: Found '%s' in SRAM at offset 0x%04x\n", needle, i);
+                    return 1;
+                }
+            }
+        }
+        snprintf(buf, buf_len, "-1");
+        return 1;
+    }
+
+    /* Debug: read SRAM byte at offset */
+    if (strncmp(key, "debug_sram_", 11) == 0 && g_mcu) {
+        int offset = strtol(key + 11, NULL, 0);
+        if (offset >= 0 && offset < SRAM_SIZE) {
+            snprintf(buf, buf_len, "%d", g_mcu->sram[offset]);
+            return 1;
+        }
+    }
+
     /* Note: tempo and clock_mode are now host settings */
     return 0;
 }
@@ -1846,6 +2042,14 @@ static void jv880_render_block(int16_t *out, int frames) {
     for (int i = to_read; i < frames; i++) {
         out[i * 2 + 0] = 0;
         out[i * 2 + 1] = 0;
+    }
+
+    /* Check for pending SRAM scan (for performance data discovery) */
+    if (g_sram_scan_countdown > 0) {
+        g_sram_scan_countdown--;
+        if (g_sram_scan_countdown == 0) {
+            scan_sram_for_performance();
+        }
     }
 }
 

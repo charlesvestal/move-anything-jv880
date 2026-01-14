@@ -350,7 +350,7 @@ function getParamValue(scope, key, target) {
     const storeKey = getParamStoreKey(scope, key, target);
     if (paramValues.has(storeKey)) return paramValues.get(storeKey);
 
-    /* Try to read from DSP/NVRAM using parameter names */
+    /* Try to read from DSP/NVRAM/SRAM using parameter names */
     let dspKey = null;
     if (scope === 'patchCommon') {
         /* Pass parameter name directly - DSP maps to correct NVRAM offset */
@@ -361,6 +361,13 @@ function getParamValue(scope, key, target) {
     } else if (scope === 'partTone') {
         const toneIdx = target?.tone ?? 0;
         dspKey = `nvram_tone_${toneIdx}_${key}`;
+    } else if (scope === 'performanceCommon') {
+        /* Read from SRAM temp performance buffer */
+        dspKey = `sram_perfCommon_${key}`;
+    } else if (scope === 'part') {
+        /* Read from SRAM temp performance buffer - part data */
+        const partIdx = target !== undefined ? target : 0;
+        dspKey = `sram_part_${partIdx}_${key}`;
     }
 
     if (dspKey) {
