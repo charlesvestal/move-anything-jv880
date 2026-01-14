@@ -71,8 +71,10 @@ Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where te
 - [x] SysEx builders for part params (`buildPartParam`)
 - [x] UI menus for performance common (reverb, chorus, key mode)
 - [x] UI menus for part editing (level, pan, tune, key range, etc.)
-- [ ] Add DSP handlers for reading initial values from temp performance SRAM
-- [ ] Alternatively: parse stored performance structure to initialize values
+- [x] **FOUND temp performance in SRAM at offset 0x206a** (fixed buffer, same format as stored)
+- [x] Add DSP handlers for reading performance common params from SRAM (`sram_perfCommon_<param>`)
+- [ ] Add DSP handlers for reading part params (need to decode stored part format)
+- [ ] Part format appears to be ~21 bytes/part, more compact than SysEx format
 
 ### 3. Implement Patch Saving
 Options to investigate:
