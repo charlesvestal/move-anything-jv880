@@ -58,7 +58,7 @@ Background thread runs emulator at accelerated rate to fill audio ring buffer. M
 - Patch mode: Track buttons 1-4 select tones (LEDs show enabled/selected)
 - Performance mode: Track buttons disabled (LEDs off), Step buttons 1-8 select parts
 - Encoder macros differ by mode:
-  - Patch: Cutoff, Resonance, Attack, Release, LFO Rate, LFO Depth, Reverb, Level
+  - Patch: Cutoff, Resonance, Attack, Release, LFO Rate, LFO Depth, FX Send, Level
   - Performance: Level, Pan, Coarse Tune, Fine Tune, Key Range Lo/Hi, Velocity Sense/Max
 
 ## ROM Requirements
