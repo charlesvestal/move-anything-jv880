@@ -113,6 +113,7 @@ typedef struct {
 static ExpansionInfo g_expansions[MAX_EXPANSIONS];
 static int g_expansion_count = 0;
 static int g_current_expansion = -1;  /* Currently loaded expansion (-1 = none) */
+static int g_expansion_bank_offset = 0;  /* Which 64-patch bank is loaded (0, 64, 128, 192) */
 
 /* Unified patch list */
 #define MAX_TOTAL_PATCHES 4096
@@ -1754,14 +1755,31 @@ static void jv880_set_param(const char *key, const char *val) {
         set_mode(mode);
     } else if (strcmp(key, "load_expansion") == 0) {
         /* Load a specific expansion card by index
-         * This sets which expansion is active for patchnumber 64-127 in performances */
+         * This sets which expansion is active for patchnumber 64-127 in performances
+         * Format: "idx" or "idx,bank_offset" */
         int exp_idx = atoi(val);
+        int bank_offset = 0;
+        const char *comma = strchr(val, ',');
+        if (comma) {
+            bank_offset = atoi(comma + 1);
+        }
         if (exp_idx >= 0 && exp_idx < g_expansion_count) {
+            /* Validate bank offset */
+            int max_offset = (g_expansions[exp_idx].patch_count > 64) ?
+                             ((g_expansions[exp_idx].patch_count - 1) / 64) * 64 : 0;
+            if (bank_offset < 0) bank_offset = 0;
+            if (bank_offset > max_offset) bank_offset = max_offset;
+            g_expansion_bank_offset = bank_offset;
             load_expansion_to_emulator(exp_idx);
-            fprintf(stderr, "JV880: Loaded expansion card: %s\n", g_expansions[exp_idx].name);
+            fprintf(stderr, "JV880: Loaded expansion card: %s (patches %d-%d)\n",
+                    g_expansions[exp_idx].name,
+                    bank_offset + 1,
+                    bank_offset + 64 > g_expansions[exp_idx].patch_count ?
+                        g_expansions[exp_idx].patch_count : bank_offset + 64);
         } else if (exp_idx == -1) {
             /* -1 means no expansion (clear the card slot) */
             g_current_expansion = -1;
+            g_expansion_bank_offset = 0;
             fprintf(stderr, "JV880: Cleared expansion card slot\n");
         } else {
             fprintf(stderr, "JV880: Invalid expansion index %d (have %d expansions)\n",
@@ -2057,6 +2075,17 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
             snprintf(buf, buf_len, "%s", g_expansions[idx].name);
             return 1;
         }
+    }
+    if (strncmp(key, "expansion_", 10) == 0 && strstr(key, "_patch_count")) {
+        int idx = atoi(key + 10);
+        if (idx >= 0 && idx < g_expansion_count) {
+            snprintf(buf, buf_len, "%d", g_expansions[idx].patch_count);
+            return 1;
+        }
+    }
+    if (strcmp(key, "expansion_bank_offset") == 0) {
+        snprintf(buf, buf_len, "%d", g_expansion_bank_offset);
+        return 1;
     }
     if (strcmp(key, "mode") == 0) {
         snprintf(buf, buf_len, "%d", g_performance_mode);
