@@ -61,16 +61,38 @@ static uint8_t *g_rom2 = nullptr;
 /* SRAM offset for temp performance (discovered via scanning) */
 #define SRAM_TEMP_PERF_OFFSET   0x206a   /* Temp performance buffer in SRAM */
 
-/* Temp performance structure offsets (stored format, 204 bytes total):
+/* Temp performance structure offsets (discovered via automated mapping):
  *   0-11:  Name (12 bytes)
- *   12:    Key mode
- *   13-16: Reverb (type, level, time, feedback)
- *   17-22: Chorus (type, level, depth, rate, feedback, output)
- *   23-30: Voice reserve 1-8
- *   31+:   Part data (8 parts × ~21 bytes each)
+ *   12:    Key mode (packed with other flags)
+ *   14:    Reverb time
+ *   15:    Reverb feedback
+ *   16:    Chorus level
+ *   17:    Chorus depth
+ *   18:    Chorus rate
+ *   19:    Chorus feedback
+ *   20-24: Voice reserve 1-5
+ *   28+:   Part data (8 parts × 22 bytes each)
+ *
+ * Part structure (22 bytes per part, offset from part base):
+ *   +0:  Flags (transmit switch/channel/output packed)
+ *   +4:  Transmit key range lower
+ *   +6:  Transmit key transpose
+ *   +7:  Transmit velocity sense
+ *   +8:  Transmit velocity max
+ *   +9:  Transmit velocity curve
+ *   +10: Internal key range lower
+ *   +12: Internal key transpose
+ *   +13: Internal velocity sense
+ *   +14: Internal velocity max
+ *   +15: Internal velocity curve
+ *   +17: Part level
+ *   +18: Part pan
+ *   +19: Part coarse tune
+ *   +20: Part fine tune
+ *   +21: Receive channel
  */
-#define TEMP_PERF_COMMON_SIZE   31   /* Bytes for common params (name + settings) */
-#define TEMP_PERF_PART_SIZE     21   /* Approximate bytes per part in stored format */
+#define TEMP_PERF_COMMON_SIZE   28   /* Bytes before part data starts */
+#define TEMP_PERF_PART_SIZE     22   /* Bytes per part (discovered) */
 
 /* Expansion ROM support */
 #define EXPANSION_SIZE_8MB 0x800000  /* 8MB standard */
@@ -160,6 +182,286 @@ typedef struct {
 static char g_expansion_files[MAX_EXP_FILES][256];
 static uint32_t g_expansion_sizes[MAX_EXP_FILES];
 static int g_expansion_file_count = 0;
+
+/* ========================================================================
+ * AUTOMATED PARAMETER MAPPING
+ * Systematically tests SysEx parameters and logs which SRAM bytes change.
+ * ======================================================================== */
+#define MAP_SRAM_SCAN_SIZE 512  /* Bytes to scan around temp perf */
+
+/* Parameter definition: SysEx offset, name, test value, is_two_byte */
+typedef struct {
+    uint8_t sysex_offset;
+    const char* name;
+    uint8_t test_value;
+    int is_two_byte;
+} ParamDef;
+
+/* Performance Common parameters (SysEx address: 00 00 10 XX) */
+/* Test values chosen to differ from typical defaults */
+static const ParamDef PERF_COMMON_PARAMS[] = {
+    {0x0C, "keymode", 2, 0},           /* Default likely 0, test 2 */
+    {0x0D, "reverbtype", 5, 0},        /* Test different type */
+    {0x0E, "reverblevel", 33, 0},      /* Different from 0 or 127 */
+    {0x0F, "reverbtime", 77, 0},
+    {0x10, "reverbfeedback", 77, 0},
+    {0x11, "chorustype", 1, 0},        /* Test different type */
+    {0x12, "choruslevel", 33, 0},
+    {0x13, "chorusdepth", 77, 0},
+    {0x14, "chorusrate", 77, 0},
+    {0x15, "chorusfeedback", 77, 0},
+    {0x16, "chorusoutput", 0, 0},      /* Switch: test 0 (likely default 1) */
+    {0x17, "voicereserve1", 2, 0},     /* Different from default 4 */
+    {0x18, "voicereserve2", 2, 0},
+    {0x19, "voicereserve3", 2, 0},
+    {0x1A, "voicereserve4", 2, 0},
+    {0x1B, "voicereserve5", 2, 0},
+    {0x1C, "voicereserve6", 2, 0},
+    {0x1D, "voicereserve7", 2, 0},
+    {0x1E, "voicereserve8", 2, 0},
+};
+#define NUM_PERF_COMMON_PARAMS (sizeof(PERF_COMMON_PARAMS)/sizeof(PERF_COMMON_PARAMS[0]))
+
+/* Part parameters (SysEx address: 00 00 18+part XX) */
+/* Test values: switches use 0 (default likely 1), ranges use distinctive values */
+static const ParamDef PART_PARAMS[] = {
+    {0x00, "transmitswitch", 0, 0},         /* Switch: test 0 */
+    {0x01, "transmitchannel", 7, 0},        /* Different channel */
+    {0x02, "transmitprogramchange", 33, 1}, /* Distinctive value */
+    {0x04, "transmitvolume", 77, 1},
+    {0x06, "transmitpan", 33, 1},
+    {0x08, "transmitkeyrangelower", 24, 0}, /* Low range */
+    {0x09, "transmitkeyrangeupper", 108, 0},/* High range */
+    {0x0A, "transmitkeytranspose", 52, 0},
+    {0x0B, "transmitvelocitysense", 77, 0},
+    {0x0C, "transmitvelocitymax", 77, 0},
+    {0x0D, "transmitvelocitycurve", 5, 0},
+    {0x0E, "internalswitch", 0, 0},         /* Switch: test 0 */
+    {0x0F, "internalkeyrangelower", 24, 0},
+    {0x10, "internalkeyrangeupper", 108, 0},
+    {0x11, "internalkeytranspose", 52, 0},
+    {0x12, "internalvelocitysense", 77, 0},
+    {0x13, "internalvelocitymax", 77, 0},
+    {0x14, "internalvelocitycurve", 5, 0},
+    {0x15, "receiveswitch", 0, 0},          /* Switch: test 0 */
+    {0x16, "receivechannel", 7, 0},
+    {0x17, "patchnumber", 33, 1},           /* Different patch number */
+    {0x19, "partlevel", 77, 0},
+    {0x1A, "partpan", 33, 0},
+    {0x1B, "partcoarsetune", 76, 0},
+    {0x1C, "partfinetune", 78, 0},
+    {0x1D, "reverbswitch", 0, 0},           /* Switch: test 0 */
+    {0x1E, "chorusswitch", 0, 0},           /* Switch: test 0 */
+    {0x1F, "receiveprogramchange", 0, 0},   /* Switch: test 0 */
+    {0x20, "receivevolume", 0, 0},          /* Switch: test 0 */
+    {0x21, "receivehold1", 0, 0},           /* Switch: test 0 */
+    {0x22, "outputselect", 2, 0},           /* Different output */
+};
+#define NUM_PART_PARAMS (sizeof(PART_PARAMS)/sizeof(PART_PARAMS[0]))
+
+/* Mapping state machine */
+enum MapPhase {
+    MAP_IDLE = 0,
+    MAP_SNAPSHOT,       /* Take SRAM snapshot */
+    MAP_SEND_SYSEX,     /* Send the SysEx */
+    MAP_WAIT,           /* Wait for emulator to process */
+    MAP_COMPARE,        /* Compare and log changes */
+    MAP_NEXT,           /* Move to next parameter */
+    MAP_DONE            /* All done */
+};
+
+static int g_map_active = 0;
+static int g_map_phase = MAP_IDLE;
+static int g_map_mode = 0;          /* 0=common, 1=part */
+static int g_map_part = 0;          /* Which part (0-7) when mapping parts */
+static int g_map_param_idx = 0;     /* Current parameter index */
+static int g_map_wait_cycles = 0;   /* Wait counter */
+static int g_map_test_pass = 0;     /* 0-2: test with 3 different values */
+static uint8_t g_map_sram_snapshot[MAP_SRAM_SCAN_SIZE];
+static uint8_t g_map_sysex_pending[16];
+static int g_map_sysex_len = 0;
+static int g_map_last_offset = -1;  /* Track offset from previous pass */
+
+/* Process one step of the parameter mapping */
+static void process_mapping_step(void) {
+    if (!g_map_active || !g_mcu) return;
+
+    switch (g_map_phase) {
+    case MAP_SNAPSHOT:
+        /* Take snapshot of SRAM around temp perf */
+        memcpy(g_map_sram_snapshot, &g_mcu->sram[SRAM_TEMP_PERF_OFFSET], MAP_SRAM_SCAN_SIZE);
+        g_map_phase = MAP_SEND_SYSEX;
+        break;
+
+    case MAP_SEND_SYSEX: {
+        const ParamDef* param;
+        uint8_t addr2, addr3, addr4;
+
+        if (g_map_mode == 0) {
+            /* Common params */
+            if (g_map_param_idx >= (int)NUM_PERF_COMMON_PARAMS) {
+                /* Done with common, switch to parts */
+                g_map_mode = 1;
+                g_map_part = 0;
+                g_map_param_idx = 0;
+                fprintf(stderr, "\n=== Mapping Part %d Parameters ===\n", g_map_part + 1);
+            }
+        }
+
+        if (g_map_mode == 1) {
+            if (g_map_param_idx >= (int)NUM_PART_PARAMS) {
+                g_map_part++;
+                g_map_param_idx = 0;
+                if (g_map_part >= 8) {
+                    g_map_phase = MAP_DONE;
+                    break;
+                }
+                fprintf(stderr, "\n=== Mapping Part %d Parameters ===\n", g_map_part + 1);
+            }
+        }
+
+        if (g_map_mode == 0) {
+            param = &PERF_COMMON_PARAMS[g_map_param_idx];
+            addr2 = 0x00;
+            addr3 = 0x10;
+            addr4 = param->sysex_offset;
+            fprintf(stderr, "Testing common/%s (SysEx 00 00 10 %02x)... ", param->name, addr4);
+        } else {
+            param = &PART_PARAMS[g_map_param_idx];
+            addr2 = 0x00;
+            addr3 = 0x18 + g_map_part;
+            addr4 = param->sysex_offset;
+            fprintf(stderr, "Testing part%d/%s (SysEx 00 00 %02x %02x)... ", g_map_part + 1, param->name, addr3, addr4);
+        }
+
+        /* Build DT1 SysEx message inline */
+        {
+            uint8_t* msg = g_map_sysex_pending;
+            int len = 0;
+            msg[len++] = 0xF0;  /* SysEx start */
+            msg[len++] = 0x41;  /* Roland */
+            msg[len++] = 0x10;  /* Device ID */
+            msg[len++] = 0x46;  /* JV-880 */
+            msg[len++] = 0x12;  /* DT1 */
+            msg[len++] = 0x00;  /* addr1 */
+            msg[len++] = addr2;
+            msg[len++] = addr3;
+            msg[len++] = addr4;
+            /* Calculate test value based on pass (0, 1, 64, 100, 127) */
+            uint8_t test_val;
+            switch (g_map_test_pass) {
+                case 0: test_val = 0; break;    /* Test with 0 for switches */
+                case 1: test_val = 1; break;    /* Test with 1 for switches */
+                case 2: test_val = 64; break;   /* Center value */
+                case 3: test_val = 100; break;  /* Higher value */
+                case 4: test_val = 127; break;  /* Max value */
+                default: test_val = param->test_value; break;
+            }
+            if (param->is_two_byte) {
+                /* For 2-byte params, vary MSB too on pass 2 */
+                msg[len++] = (g_map_test_pass == 2) ? 0x01 : 0x00;
+                msg[len++] = test_val & 0x7F;
+            } else {
+                msg[len++] = test_val & 0x7F;
+            }
+            fprintf(stderr, "[pass %d, val=%d] ", g_map_test_pass, test_val);
+            /* Calculate checksum */
+            uint8_t sum = 0;
+            for (int i = 5; i < len; i++) sum += msg[i];
+            msg[len++] = (128 - (sum & 0x7F)) & 0x7F;
+            msg[len++] = 0xF7;  /* SysEx end */
+            g_map_sysex_len = len;
+        }
+        g_map_wait_cycles = 0;
+        g_map_phase = MAP_WAIT;
+        break;
+    }
+
+    case MAP_WAIT:
+        /* Wait for emulator to process (~250ms to ensure SysEx is fully processed) */
+        g_map_wait_cycles++;
+        if (g_map_wait_cycles >= 50) {  /* ~250ms for reliable detection */
+            g_map_phase = MAP_COMPARE;
+        }
+        break;
+
+    case MAP_COMPARE: {
+        /* Find which bytes changed */
+        int changes[32];
+        int change_count = 0;
+
+        for (int i = 0; i < MAP_SRAM_SCAN_SIZE && change_count < 32; i++) {
+            if (g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i] != g_map_sram_snapshot[i]) {
+                changes[change_count++] = i;
+            }
+        }
+
+        /* Calculate what test value we sent */
+        uint8_t sent_val;
+        switch (g_map_test_pass) {
+            case 0: sent_val = 0; break;
+            case 1: sent_val = 1; break;
+            case 2: sent_val = 64; break;
+            case 3: sent_val = 100; break;
+            case 4: sent_val = 127; break;
+            default: sent_val = 0; break;
+        }
+
+        if (change_count == 0) {
+            fprintf(stderr, "NO CHANGE\n");
+            g_map_last_offset = -1;
+        } else if (change_count == 1) {
+            int off = changes[0];
+            uint8_t oldv = g_map_sram_snapshot[off];
+            uint8_t newv = g_mcu->sram[SRAM_TEMP_PERF_OFFSET + off];
+            /* Check if offset is consistent and value matches */
+            if (g_map_test_pass > 0 && g_map_last_offset >= 0 && off != g_map_last_offset) {
+                fprintf(stderr, "SRAM[%d]: %d -> %d (OFFSET CHANGED from %d!)\n",
+                    off, oldv, newv, g_map_last_offset);
+            } else if (newv == sent_val) {
+                fprintf(stderr, "SRAM[%d]: %d -> %d ✓ (matches sent value)\n", off, oldv, newv);
+            } else {
+                fprintf(stderr, "SRAM[%d]: %d -> %d (sent %d, got %d - PACKED?)\n",
+                    off, oldv, newv, sent_val, newv);
+            }
+            g_map_last_offset = off;
+        } else {
+            fprintf(stderr, "%d changes: ", change_count);
+            for (int i = 0; i < change_count && i < 8; i++) {
+                int off = changes[i];
+                fprintf(stderr, "[%d]=%d ", off, g_mcu->sram[SRAM_TEMP_PERF_OFFSET + off]);
+            }
+            fprintf(stderr, "\n");
+            g_map_last_offset = -1;
+        }
+
+        g_map_phase = MAP_NEXT;
+        break;
+    }
+
+    case MAP_NEXT:
+        /* For Part 1 only, run 5 test passes per parameter to verify mapping */
+        if (g_map_mode == 1 && g_map_part == 0 && g_map_test_pass < 4) {
+            g_map_test_pass++;
+            g_map_phase = MAP_SNAPSHOT;
+        } else {
+            g_map_test_pass = 0;
+            g_map_last_offset = -1;
+            g_map_param_idx++;
+            g_map_phase = MAP_SNAPSHOT;
+        }
+        break;
+
+    case MAP_DONE:
+        fprintf(stderr, "\n=== Parameter Mapping Complete ===\n");
+        g_map_active = 0;
+        g_map_phase = MAP_IDLE;
+        break;
+
+    default:
+        break;
+    }
+}
 
 /* Background emulation thread */
 static pthread_t g_emu_thread;
@@ -1049,6 +1351,12 @@ static void *emu_thread_func(void *arg) {
             g_midi_read = (g_midi_read + 1) % MIDI_QUEUE_SIZE;
         }
 
+        /* Check for pending parameter mapping SysEx */
+        if (g_map_sysex_len > 0) {
+            g_mcu->postMidiSC55(g_map_sysex_pending, g_map_sysex_len);
+            g_map_sysex_len = 0;
+        }
+
         /* Check if we need more audio */
         int free_space = ring_free();
         if (free_space < 64) {
@@ -1476,6 +1784,109 @@ static void jv880_set_param(const char *key, const char *val) {
             fclose(f);
             fprintf(stderr, "JV880: Dumped NVRAM to %s\n", path);
         }
+    } else if (strcmp(key, "dump_temp_perf") == 0 && g_mcu) {
+        /* Debug: dump temp performance from SRAM for analysis */
+        fprintf(stderr, "JV880: === Temp Performance at SRAM 0x%04x ===\n", SRAM_TEMP_PERF_OFFSET);
+
+        /* Get name */
+        char name[13];
+        memcpy(name, &g_mcu->sram[SRAM_TEMP_PERF_OFFSET], 12);
+        name[12] = '\0';
+        fprintf(stderr, "Name: '%s'\n", name);
+
+        /* Dump first 64 bytes (common area) */
+        fprintf(stderr, "\nCommon area (bytes 0-63):\n");
+        for (int i = 0; i < 64; i += 16) {
+            fprintf(stderr, "  %04x: ", i);
+            for (int j = 0; j < 16 && (i+j) < 64; j++) {
+                fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i + j]);
+            }
+            fprintf(stderr, " |");
+            for (int j = 0; j < 16 && (i+j) < 64; j++) {
+                uint8_t c = g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i + j];
+                fprintf(stderr, "%c", (c >= 32 && c < 127) ? c : '.');
+            }
+            fprintf(stderr, "|\n");
+        }
+
+        /* Dump part data - try different layouts */
+        fprintf(stderr, "\nPart data (bytes 31-203, 8 parts):\n");
+        int partStart = 31;  /* After common params */
+        int bytesPerPart = (204 - 31) / 8;  /* ~21 bytes per part */
+        for (int part = 0; part < 8; part++) {
+            int offset = partStart + part * bytesPerPart;
+            fprintf(stderr, "  Part %d (offset %d, 0x%02x):\n    ", part + 1, offset, offset);
+            for (int j = 0; j < bytesPerPart; j++) {
+                fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + offset + j]);
+            }
+            fprintf(stderr, "\n");
+        }
+
+        /* Also dump beyond 204 bytes in case temp format is larger */
+        fprintf(stderr, "\nExtended area (bytes 204-400) to check if temp format is larger:\n");
+        for (int i = 204; i < 400; i += 16) {
+            fprintf(stderr, "  %04x: ", i);
+            for (int j = 0; j < 16 && (i+j) < 400; j++) {
+                fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i + j]);
+            }
+            fprintf(stderr, " |");
+            for (int j = 0; j < 16 && (i+j) < 400; j++) {
+                uint8_t c = g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i + j];
+                fprintf(stderr, "%c", (c >= 32 && c < 127) ? c : '.');
+            }
+            fprintf(stderr, "|\n");
+        }
+        fprintf(stderr, "=== End Temp Performance ===\n");
+    } else if (strcmp(key, "start_param_mapping") == 0 && g_mcu) {
+        /* Start automated parameter mapping */
+        if (!g_map_active) {
+            fprintf(stderr, "\n");
+            fprintf(stderr, "=================================================================\n");
+            fprintf(stderr, "=== AUTOMATED PARAMETER MAPPING ===\n");
+            fprintf(stderr, "=== Testing SysEx parameters and monitoring SRAM changes... ===\n");
+            fprintf(stderr, "=================================================================\n");
+            fprintf(stderr, "\n=== Mapping Performance Common Parameters ===\n");
+            g_map_active = 1;
+            g_map_phase = MAP_SNAPSHOT;
+            g_map_mode = 0;  /* Start with common params */
+            g_map_part = 0;
+            g_map_param_idx = 0;
+            g_map_wait_cycles = 0;
+        } else {
+            fprintf(stderr, "JV880: Parameter mapping already in progress\n");
+        }
+    } else if (strcmp(key, "stop_param_mapping") == 0) {
+        /* Stop parameter mapping */
+        g_map_active = 0;
+        g_map_phase = MAP_IDLE;
+        fprintf(stderr, "JV880: Parameter mapping stopped\n");
+    } else if (strcmp(key, "dump_part_values") == 0 && g_mcu) {
+        /* Dump all part parameter values for verification */
+        fprintf(stderr, "\n=== Current Part Parameter Values ===\n");
+        fprintf(stderr, "LCD Line 0: '%s'\n", g_mcu->lcd.GetLine(0));
+        fprintf(stderr, "LCD Line 1: '%s'\n\n", g_mcu->lcd.GetLine(1));
+        fprintf(stderr, "Part | Level | Pan  | Coarse | Fine | KeyLo | IntKeyLo\n");
+        fprintf(stderr, "-----+-------+------+--------+------+-------+---------\n");
+        for (int p = 0; p < 8; p++) {
+            int base = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (p * TEMP_PERF_PART_SIZE);
+            uint8_t level = g_mcu->sram[base + 17];
+            uint8_t pan = g_mcu->sram[base + 18];
+            uint8_t coarse = g_mcu->sram[base + 19];
+            uint8_t fine = g_mcu->sram[base + 20];
+            uint8_t keylo = g_mcu->sram[base + 4];   /* transmit key range lower */
+            uint8_t intkeylo = g_mcu->sram[base + 10];  /* internal key range lower */
+            fprintf(stderr, "  %d  |  %3d  | %3d  |  %3d   | %3d  |  %3d  |  %3d\n",
+                    p + 1, level, pan, coarse, fine, keylo, intkeylo);
+        }
+        fprintf(stderr, "\nCommon: keymode=%d reverbtime=%d choruslevel=%d\n",
+                g_mcu->sram[SRAM_TEMP_PERF_OFFSET + 12] & 0x03,
+                g_mcu->sram[SRAM_TEMP_PERF_OFFSET + 14],
+                g_mcu->sram[SRAM_TEMP_PERF_OFFSET + 16]);
+        fprintf(stderr, "\nRaw bytes around part 1 (offset 28-50):\n  ");
+        for (int i = 28; i < 50; i++) {
+            fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i]);
+        }
+        fprintf(stderr, "\n=== End Part Values ===\n");
     }
     /* Note: tempo and clock_mode are now host settings */
 }
@@ -1924,38 +2335,43 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
 
     /* Read performance common parameter from SRAM temp buffer
      * Format: sram_perfCommon_<paramName>
-     * Stored format offsets:
-     *   12: keymode, 13: reverbtype, 14: reverblevel, 15: reverbtime, 16: reverbfeedback
-     *   17: chorustype, 18: choruslevel, 19: chorusdepth, 20: chorusrate, 21: chorusfeedback, 22: chorusoutput
-     *   23-30: voicereserve1-8
+     * Offsets discovered via automated mapping:
+     *   12: keymode (packed)
+     *   14: reverbtime
+     *   15: reverbfeedback
+     *   16: choruslevel
+     *   17: chorusdepth
+     *   18: chorusrate
+     *   19: chorusfeedback
+     *   20-24: voicereserve1-5
      */
     if (strncmp(key, "sram_perfCommon_", 16) == 0 && g_mcu) {
         const char* paramName = key + 16;
         int offset = -1;
+        int bitMask = 0;
 
-        /* Map parameter names to stored format offsets */
-        if (strcmp(paramName, "keymode") == 0) offset = 12;
-        else if (strcmp(paramName, "reverbtype") == 0) offset = 13;
-        else if (strcmp(paramName, "reverblevel") == 0) offset = 14;
-        else if (strcmp(paramName, "reverbtime") == 0) offset = 15;
-        else if (strcmp(paramName, "reverbfeedback") == 0) offset = 16;
-        else if (strcmp(paramName, "chorustype") == 0) offset = 17;
-        else if (strcmp(paramName, "choruslevel") == 0) offset = 18;
-        else if (strcmp(paramName, "chorusdepth") == 0) offset = 19;
-        else if (strcmp(paramName, "chorusrate") == 0) offset = 20;
-        else if (strcmp(paramName, "chorusfeedback") == 0) offset = 21;
-        else if (strcmp(paramName, "chorusoutput") == 0) offset = 22;
-        else if (strcmp(paramName, "voicereserve1") == 0) offset = 23;
-        else if (strcmp(paramName, "voicereserve2") == 0) offset = 24;
-        else if (strcmp(paramName, "voicereserve3") == 0) offset = 25;
-        else if (strcmp(paramName, "voicereserve4") == 0) offset = 26;
-        else if (strcmp(paramName, "voicereserve5") == 0) offset = 27;
-        else if (strcmp(paramName, "voicereserve6") == 0) offset = 28;
-        else if (strcmp(paramName, "voicereserve7") == 0) offset = 29;
-        else if (strcmp(paramName, "voicereserve8") == 0) offset = 30;
+        /* Map parameter names to discovered SRAM offsets */
+        if (strcmp(paramName, "keymode") == 0) {
+            offset = 12;
+            bitMask = 0x03;  /* Lower 2 bits based on mapping results */
+        }
+        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
+        else if (strcmp(paramName, "reverbfeedback") == 0) offset = 15;
+        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
+        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
+        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
+        else if (strcmp(paramName, "chorusfeedback") == 0) offset = 19;
+        else if (strcmp(paramName, "voicereserve1") == 0) offset = 20;
+        else if (strcmp(paramName, "voicereserve2") == 0) offset = 21;
+        else if (strcmp(paramName, "voicereserve3") == 0) offset = 22;
+        else if (strcmp(paramName, "voicereserve4") == 0) offset = 23;
+        else if (strcmp(paramName, "voicereserve5") == 0) offset = 24;
 
         if (offset >= 0) {
             uint8_t val = g_mcu->sram[SRAM_TEMP_PERF_OFFSET + offset];
+            if (bitMask != 0) {
+                val = val & bitMask;
+            }
             snprintf(buf, buf_len, "%d", val);
             return 1;
         }
@@ -1963,28 +2379,123 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
 
     /* Read part parameter from SRAM temp buffer
      * Format: sram_part_<partIdx>_<paramName>
-     * Part data starts at offset 31, each part is ~21 bytes
-     * Stored format is compact - only key params are directly accessible:
-     *   Part offset + 0: flags/status
-     *   Part offset + 8-9: patch number (bank + number)
-     *   Part offset + 13-14: level, pan
+     * Part data starts at offset 28, each part is 22 bytes (discovered via mapping)
      */
     if (strncmp(key, "sram_part_", 10) == 0 && g_mcu) {
         int partIdx = key[10] - '0';
         if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
             const char* paramName = key + 12;
             int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
+            int offset = -1;
 
-            /* The stored part format is complex - we'll expose raw bytes for now
-             * and refine once we understand the mapping better */
-            if (strcmp(paramName, "byte0") == 0) {
-                snprintf(buf, buf_len, "%d", g_mcu->sram[partBase + 0]);
-                return 1;
-            } else if (strcmp(paramName, "byte1") == 0) {
-                snprintf(buf, buf_len, "%d", g_mcu->sram[partBase + 1]);
+            /* Part parameter offsets (discovered via automated mapping Jan 2025) */
+            /* Direct storage parameters */
+            if (strcmp(paramName, "partlevel") == 0) offset = 17;
+            else if (strcmp(paramName, "partpan") == 0) offset = 18;
+            else if (strcmp(paramName, "transmitprogramchange") == 0) offset = 1;
+            else if (strcmp(paramName, "transmitvolume") == 0) offset = 2;
+            else if (strcmp(paramName, "transmitpan") == 0) offset = 3;
+            else if (strcmp(paramName, "transmitkeyrangelower") == 0) offset = 4;
+            else if (strcmp(paramName, "transmitkeyrangeupper") == 0) offset = 5;
+            else if (strcmp(paramName, "transmitvelocitymax") == 0) offset = 8;
+            else if (strcmp(paramName, "transmitvelocitycurve") == 0) offset = 9;
+            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
+            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
+            else if (strcmp(paramName, "internalvelocitymax") == 0) offset = 14;
+            else if (strcmp(paramName, "patchnumber") == 0) offset = 16;
+            /* Signed offset parameters: stored = (val-64)&0xFF, read = (stored+64)&0x7F */
+            else if (strcmp(paramName, "transmitkeytranspose") == 0 ||
+                     strcmp(paramName, "transmitvelocitysense") == 0 ||
+                     strcmp(paramName, "internalkeytranspose") == 0 ||
+                     strcmp(paramName, "internalvelocitysense") == 0 ||
+                     strcmp(paramName, "partcoarsetune") == 0 ||
+                     strcmp(paramName, "partfinetune") == 0) {
+                if (strcmp(paramName, "transmitkeytranspose") == 0) offset = 6;
+                else if (strcmp(paramName, "transmitvelocitysense") == 0) offset = 7;
+                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
+                else if (strcmp(paramName, "internalvelocitysense") == 0) offset = 13;
+                else if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
+                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
+                if (offset >= 0) {
+                    int8_t stored = (int8_t)g_mcu->sram[partBase + offset];
+                    int val = stored + 64;  /* Convert from signed offset */
+                    snprintf(buf, buf_len, "%d", val);
+                    return 0;
+                }
+            }
+            /* Packed byte 0: [internalswitch:7][transmitswitch:6][outputselect:4-5][transmitchannel:0-3] */
+            else if (strcmp(paramName, "transmitswitch") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 0];
+                snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "internalswitch") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 0];
+                snprintf(buf, buf_len, "%d", (b >> 7) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "outputselect") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 0];
+                snprintf(buf, buf_len, "%d", (b >> 4) & 3);
+                return 0;
+            }
+            else if (strcmp(paramName, "transmitchannel") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 0];
+                snprintf(buf, buf_len, "%d", b & 0x0F);
+                return 0;
+            }
+            /* Packed byte 15: [receiveprogramchange:7][receivevolume:6][receivehold1:5][internalvelocitycurve:0-2] */
+            else if (strcmp(paramName, "internalvelocitycurve") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 15];
+                snprintf(buf, buf_len, "%d", b & 0x07);
+                return 0;
+            }
+            else if (strcmp(paramName, "receiveprogramchange") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 15];
+                snprintf(buf, buf_len, "%d", (b >> 7) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "receivevolume") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 15];
+                snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "receivehold1") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 15];
+                snprintf(buf, buf_len, "%d", (b >> 5) & 1);
+                return 0;
+            }
+            /* Packed byte 21: [receiveswitch:7][reverbswitch:6][chorusswitch:5][receivechannel:0-3] */
+            else if (strcmp(paramName, "receiveswitch") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 21];
+                snprintf(buf, buf_len, "%d", (b >> 7) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "reverbswitch") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 21];
+                snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "chorusswitch") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 21];
+                snprintf(buf, buf_len, "%d", (b >> 5) & 1);
+                return 0;
+            }
+            else if (strcmp(paramName, "receivechannel") == 0) {
+                uint8_t b = g_mcu->sram[partBase + 21];
+                snprintf(buf, buf_len, "%d", b & 0x0F);
+                return 0;
+            }
+            /* Raw byte access for debugging */
+            else if (strncmp(paramName, "byte", 4) == 0) {
+                offset = atoi(paramName + 4);
+                if (offset < 0 || offset >= TEMP_PERF_PART_SIZE) offset = -1;
+            }
+
+            if (offset >= 0) {
+                snprintf(buf, buf_len, "%d", g_mcu->sram[partBase + offset]);
                 return 1;
             }
-            /* Add more as we decode the format */
         }
     }
 
@@ -2050,6 +2561,11 @@ static void jv880_render_block(int16_t *out, int frames) {
         if (g_sram_scan_countdown == 0) {
             scan_sram_for_performance();
         }
+    }
+
+    /* Process parameter mapping state machine */
+    if (g_map_active) {
+        process_mapping_step();
     }
 }
 

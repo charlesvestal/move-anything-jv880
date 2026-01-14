@@ -136,6 +136,21 @@ function getEditPerformanceMenu() {
         createSubmenu(`Part ${selectedPart + 1} Edit`, () => getPartMenu(selectedPart)),
         createSubmenu('All Parts', () => getAllPartsMenu()),
         createSubmenu('Settings', () => getSettingsMenu()),
+        createSubmenu('Debug', () => [
+            createAction('Dump Part Values', () => {
+                host_module_set_param('dump_part_values', '1');
+            }),
+            createAction('Dump Temp Perf', () => {
+                host_module_set_param('dump_temp_perf', '1');
+            }),
+            createAction('Start Param Mapping', () => {
+                host_module_set_param('start_param_mapping', '1');
+            }),
+            createAction('Stop Param Mapping', () => {
+                host_module_set_param('stop_param_mapping', '1');
+            }),
+            createBack()
+        ]),
         createBack()
     ];
 }
