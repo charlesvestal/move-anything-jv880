@@ -161,25 +161,52 @@ function getEditPerformanceMenu() {
 function getExpansionCardMenu() {
     const expansionCount = parseInt(host_module_get_param('expansion_count') || '0');
     const currentExpansion = parseInt(host_module_get_param('current_expansion') || '-1');
+    const currentBankOffset = parseInt(host_module_get_param('expansion_bank_offset') || '0');
     const currentName = host_module_get_param('current_expansion_name') || 'None';
 
     const items = [];
 
-    /* Show current card */
-    items.push(createAction(`Current: ${currentName}`, () => {}));
+    /* Show current card and bank */
+    let currentLabel = currentName;
+    if (currentExpansion >= 0) {
+        const patchCount = parseInt(host_module_get_param(`expansion_${currentExpansion}_patch_count`) || '64');
+        if (patchCount > 64) {
+            currentLabel += ` (${currentBankOffset + 1}-${Math.min(currentBankOffset + 64, patchCount)})`;
+        }
+    }
+    items.push(createAction(`Current: ${currentLabel}`, () => {}));
 
     /* Option to clear (no card) */
     items.push(createAction('(No Card)', () => {
         host_module_set_param('load_expansion', '-1');
     }));
 
-    /* List available expansions */
+    /* List available expansions with sub-banks for large ones */
     for (let i = 0; i < expansionCount; i++) {
         const name = host_module_get_param(`expansion_${i}_name`) || `Expansion ${i + 1}`;
-        const marker = (i === currentExpansion) ? ' ✓' : '';
-        items.push(createAction(`${name}${marker}`, () => {
-            host_module_set_param('load_expansion', String(i));
-        }));
+        const patchCount = parseInt(host_module_get_param(`expansion_${i}_patch_count`) || '64');
+
+        if (patchCount <= 64) {
+            /* Single bank - show as action */
+            const marker = (i === currentExpansion && currentBankOffset === 0) ? ' ✓' : '';
+            items.push(createAction(`${name}${marker}`, () => {
+                host_module_set_param('load_expansion', String(i));
+            }));
+        } else {
+            /* Multiple banks - show as submenu */
+            items.push(createSubmenu(name, () => {
+                const bankItems = [];
+                for (let bank = 0; bank < patchCount; bank += 64) {
+                    const bankEnd = Math.min(bank + 64, patchCount);
+                    const marker = (i === currentExpansion && currentBankOffset === bank) ? ' ✓' : '';
+                    bankItems.push(createAction(`Patches ${bank + 1}-${bankEnd}${marker}`, () => {
+                        host_module_set_param('load_expansion', `${i},${bank}`);
+                    }));
+                }
+                bankItems.push(createBack());
+                return bankItems;
+            }));
+        }
     }
 
     items.push(createBack());
