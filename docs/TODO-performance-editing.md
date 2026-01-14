@@ -58,6 +58,84 @@ ROM2 structure at 0x10000:
 
 Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where temp patch begins.
 
+## Temp Performance SRAM Layout (DISCOVERED via Automated Mapping)
+
+**Base offset: 0x206a (SRAM)**
+**Total size: 204 bytes (same as stored format)**
+
+### Performance Common Layout (offsets 0-27)
+
+| Offset | SysEx | Name | Notes |
+|--------|-------|------|-------|
+| 0-11 | -- | Performance Name | 12 ASCII chars |
+| 12 | 0x0C,0x0D,0x11 | **PACKED** | keymode (bits 0-1), reverbtype (bits 2-4), chorustype (bits 5-7) |
+| 13 | 0x0E | reverblevel | |
+| 14 | 0x0F | reverbtime | |
+| 15 | 0x10 | reverbfeedback | |
+| 16 | 0x12,0x16 | **PACKED** | choruslevel (bits 0-6), chorusoutput (bit 7) |
+| 17 | 0x13 | chorusdepth | |
+| 18 | 0x14 | chorusrate | |
+| 19 | 0x15 | chorusfeedback | |
+| 20-27 | 0x17-0x1E | voicereserve1-8 | 1 byte each |
+
+### Part Data Layout (offsets 28-203)
+
+**Part base offset: 28 bytes from temp perf start**
+**Part stride: 22 bytes per part**
+
+| Offset | SysEx | Name | Storage Notes |
+|--------|-------|------|---------------|
+| 0 | PACKED | **byte0** | See bit layout below |
+| 1 | 0x02 | transmitprogramchange | Direct, 0-127 |
+| 2 | 0x04 | transmitvolume | Direct, 0-127 |
+| 3 | 0x06 | transmitpan | Direct, 0-127 |
+| 4 | 0x08 | transmitkeyrangelower | Direct, 0-127 |
+| 5 | 0x09 | transmitkeyrangeupper | Direct, 0-127 |
+| 6 | 0x0A | transmitkeytranspose | Signed offset: stored = (val-64)&0xFF |
+| 7 | 0x0B | transmitvelocitysense | Signed offset: stored = (val-64)&0xFF |
+| 8 | 0x0C | transmitvelocitymax | Direct, 0-127 |
+| 9 | 0x0D | transmitvelocitycurve | Direct, 0-6 |
+| 10 | 0x0F | internalkeyrangelower | Direct, 0-127 |
+| 11 | 0x10 | internalkeyrangeupper | Direct, 0-127 |
+| 12 | 0x11 | internalkeytranspose | Signed offset: stored = (val-64)&0xFF |
+| 13 | 0x12 | internalvelocitysense | Signed offset: stored = (val-64)&0xFF |
+| 14 | 0x13 | internalvelocitymax | Direct, 0-127 |
+| 15 | PACKED | **byte15** | See bit layout below |
+| 16 | 0x17 | patchnumber | Direct, triggers patch load |
+| 17 | 0x19 | partlevel | Direct, 0-127 |
+| 18 | 0x1A | partpan | Direct, 0-127 |
+| 19 | 0x1B | partcoarsetune | Signed offset: stored = (val-64)&0xFF |
+| 20 | 0x1C | partfinetune | Signed offset: stored = (val-64)&0xFF |
+| 21 | PACKED | **byte21** | See bit layout below |
+
+### Packed Byte Bit Layouts (VERIFIED)
+
+**Part byte 0** `[internalswitch:bit7][transmitswitch:bit6][outputselect:bits4-5][transmitchannel:bits0-3]`
+- transmitswitch: bit 6 (0=off, 1=on)
+- internalswitch: bit 7 (0=off, 1=on)
+- outputselect: bits 4-5 (0-2)
+- transmitchannel: bits 0-3 (0-15)
+
+**Part byte 15** `[receiveprogramchange:bit7][receivevolume:bit6][receivehold1:bit5][??:bits3-4][internalvelocitycurve:bits0-2]`
+- receiveprogramchange: bit 7 (0=off, 1=on)
+- receivevolume: bit 6 (0=off, 1=on)
+- receivehold1: bit 5 (0=off, 1=on)
+- internalvelocitycurve: bits 0-2 (0-6)
+
+**Part byte 21** `[receiveswitch:bit7][reverbswitch:bit6][chorusswitch:bit5][??:bit4][receivechannel:bits0-3]`
+- receiveswitch: bit 7 (0=off, 1=on)
+- reverbswitch: bit 6 (0=off, 1=on)
+- chorusswitch: bit 5 (0=off, 1=on)
+- receivechannel: bits 0-3 (0-15)
+
+### Value Transformations
+
+**Direct storage**: `stored = sysex_value`
+**Signed offset storage**: `stored = (sysex_value - 64) & 0xFF`
+- Used for: transpose, velocitysense, coarsetune, finetune
+- Reading: `sysex_value = (stored + 64) & 0x7F` (or handle signed)
+- Center value (64) stores as 0
+
 ## Implementation Tasks
 
 ### 1. Find Performance NVRAM Location
@@ -73,8 +151,10 @@ Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where te
 - [x] UI menus for part editing (level, pan, tune, key range, etc.)
 - [x] **FOUND temp performance in SRAM at offset 0x206a** (fixed buffer, same format as stored)
 - [x] Add DSP handlers for reading performance common params from SRAM (`sram_perfCommon_<param>`)
-- [ ] Add DSP handlers for reading part params (need to decode stored part format)
-- [ ] Part format appears to be ~21 bytes/part, more compact than SysEx format
+- [x] **Automated parameter mapping completed** - see SRAM Layout above
+- [x] Add DSP handlers for reading part params (level, pan, tune - working)
+- [ ] Decode packed switch bit fields (offsets 15-16)
+- [ ] Add DSP handlers for switch parameters once bit layout known
 
 ### 3. Implement Patch Saving
 Options to investigate:
