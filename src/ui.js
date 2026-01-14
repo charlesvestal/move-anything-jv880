@@ -77,8 +77,8 @@ const TRACK_NOTES = [MoveRow4, MoveRow3, MoveRow2, MoveRow1];
 const SYSEX_DEVICE_IDS = [0x10];
 const SYSEX_THROTTLE_MS = 30;
 
-/* Play mode macros for knobs */
-const PLAY_MACROS = [
+/* Patch mode macros for knobs (tone parameters) */
+const PATCH_MACROS = [
     { label: 'Cutoff', key: 'cutofffrequency', scope: 'tone' },
     { label: 'Resonance', key: 'resonance', scope: 'tone' },
     { label: 'Attack', key: 'tvaenvtime1', scope: 'tone' },
@@ -87,6 +87,18 @@ const PLAY_MACROS = [
     { label: 'LFO Depth', key: 'lfo1tvfdepth', scope: 'tone' },
     { label: 'FX Send', key: 'reverbsendlevel', scope: 'tone' },
     { label: 'Level', key: 'level', scope: 'tone' }
+];
+
+/* Performance mode macros for knobs (part parameters) */
+const PERF_MACROS = [
+    { label: 'Level', key: 'partlevel', scope: 'part' },
+    { label: 'Pan', key: 'partpan', scope: 'part' },
+    { label: 'Coarse', key: 'partcoarsetune', scope: 'part', min: 16, max: 112 },
+    { label: 'Fine', key: 'partfinetune', scope: 'part', min: 14, max: 114 },
+    { label: 'Key Lo', key: 'internalkeyrangelower', scope: 'part' },
+    { label: 'Key Hi', key: 'internalkeyrangeupper', scope: 'part' },
+    { label: 'Vel Sns', key: 'internalvelocitysense', scope: 'part' },
+    { label: 'Vel Max', key: 'internalvelocitymax', scope: 'part', min: 1, max: 127 }
 ];
 
 /* === State === */
@@ -139,6 +151,7 @@ let touchStartTick = 0;
 let globalTickCount = 0;
 let overlayExtendUntil = 0; /* Keep overlay visible until this tick */
 let lastOverlayMacro = null; /* Remember macro for extended display */
+let lastOverlayTarget = 0; /* Remember target (tone/part) for extended display */
 const MIN_OVERLAY_TICKS = 180; /* 3 seconds at 60fps */
 
 /* === State Accessor for Menu/Browser modules === */
@@ -421,16 +434,20 @@ function updateLEDs() {
 }
 
 function updateTrackLEDs() {
-    /* Track buttons always control tones (both patch and performance mode) */
+    /* Track buttons control tones - only active in Patch mode */
     for (let i = 0; i < TRACK_NOTES.length; i++) {
         const note = TRACK_NOTES[i];
-        const enabled = !!toneEnabled[i];
-        const selected = selectedTone === i;
         let color;
-        if (!enabled && !selected) color = LED_GREY;
-        else if (!enabled && selected) color = LED_WHITE;
-        else if (enabled && !selected) color = LED_DIM_GREEN;
-        else color = LED_BRIGHT_GREEN;
+        if (mode === 'performance') {
+            color = LED_OFF;
+        } else {
+            const enabled = !!toneEnabled[i];
+            const selected = selectedTone === i;
+            if (!enabled && !selected) color = LED_GREY;
+            else if (!enabled && selected) color = LED_WHITE;
+            else if (enabled && !selected) color = LED_DIM_GREEN;
+            else color = LED_BRIGHT_GREEN;
+        }
         setLED(note, color, true);
         setButtonLED(note, color, true);
     }
@@ -623,11 +640,15 @@ function handleCC(cc, value) {
         /* Use acceleration for smooth control, shift for fine control */
         const delta = shiftHeld ? decodeDelta(value) : decodeAcceleratedDelta(value, encIndex);
         if (delta !== 0) {
-            const macro = PLAY_MACROS[encIndex];
+            const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
+            const target = mode === 'performance' ? selectedPart : selectedTone;
+            const macro = macros[encIndex];
             if (macro) {
-                const current = getParamValue(macro.scope, macro.key, selectedTone);
-                const newVal = clamp(current + delta, 0, 127);
-                setParamValueAndSend(macro.scope, macro.key, newVal, selectedTone);
+                const current = getParamValue(macro.scope, macro.key, target);
+                const min = macro.min ?? 0;
+                const max = macro.max ?? 127;
+                const newVal = clamp(current + delta, min, max);
+                setParamValueAndSend(macro.scope, macro.key, newVal, target);
                 /* Use overlay for better parameter feedback */
                 showOverlay(macro.label, String(newVal));
                 needsRedraw = true;
@@ -638,6 +659,10 @@ function handleCC(cc, value) {
 
     /* Track buttons - always select tone (even in performance mode) */
     if (TRACK_NOTES.includes(cc) && value > 0) {
+        /* Track buttons control tones - only available in Patch mode */
+        if (mode === 'performance') {
+            return true;
+        }
         const trackIndex = TRACK_NOTES.indexOf(cc);
         if (shiftHeld) {
             /* Toggle tone enable */
@@ -677,8 +702,11 @@ function handleNoteOn(note, velocity, channel, source) {
         }
     }
 
-    /* Track buttons via note - always select tone (even in performance mode) */
+    /* Track buttons via note - only control tones in Patch mode */
     if (TRACK_NOTES.includes(note) && velocity > 0) {
+        if (mode === 'performance') {
+            return true;
+        }
         const trackIndex = TRACK_NOTES.indexOf(note);
         if (shiftHeld) {
             toneEnabled[trackIndex] = toneEnabled[trackIndex] ? 0 : 1;
@@ -730,15 +758,18 @@ function handleCapacitiveTouch(note, velocity) {
     /* Touch start */
     console.log('ENCODER_CCS.length=', ENCODER_CCS.length);
     if (note >= 0 && note < ENCODER_CCS.length) {
-        const macro = PLAY_MACROS[note];
+        const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
+        const target = mode === 'performance' ? selectedPart : selectedTone;
+        const macro = macros[note];
         console.log('macro for note', note, '=', macro ? macro.label : 'none');
         if (macro) {
-            const current = getParamValue(macro.scope, macro.key, selectedTone);
+            const current = getParamValue(macro.scope, macro.key, target);
             console.log('current value=', current, 'showing overlay');
             showOverlay(macro.label, String(current));
             touchedKnob = note;
             touchStartTick = globalTickCount;
             lastOverlayMacro = macro;
+            lastOverlayTarget = target;
             overlayExtendUntil = 0; /* Clear any pending extension */
             needsRedraw = true;
         }
@@ -859,16 +890,18 @@ globalThis.tick = function() {
 
     /* Keep overlay visible while knob is touched */
     if (touchedKnob >= 0) {
-        const macro = PLAY_MACROS[touchedKnob];
+        const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
+        const target = mode === 'performance' ? selectedPart : selectedTone;
+        const macro = macros[touchedKnob];
         if (macro) {
-            const current = getParamValue(macro.scope, macro.key, selectedTone);
+            const current = getParamValue(macro.scope, macro.key, target);
             showOverlay(macro.label, String(current));
         }
     }
     /* Keep overlay visible during extension period (minimum 3 sec) */
     else if (overlayExtendUntil > 0 && globalTickCount < overlayExtendUntil) {
         if (lastOverlayMacro) {
-            const current = getParamValue(lastOverlayMacro.scope, lastOverlayMacro.key, selectedTone);
+            const current = getParamValue(lastOverlayMacro.scope, lastOverlayMacro.key, lastOverlayTarget);
             showOverlay(lastOverlayMacro.label, String(current));
         }
     }
@@ -877,6 +910,7 @@ globalThis.tick = function() {
         hideOverlay();
         overlayExtendUntil = 0;
         lastOverlayMacro = null;
+        lastOverlayTarget = 0;
         needsRedraw = true;
     }
 
