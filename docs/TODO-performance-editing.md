@@ -66,12 +66,13 @@ Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where te
 - [x] Check if jv880_juce has any clues
 - [x] **FOUND**: See "Performance Data Locations" above
 
-### 2. Implement Performance Reading
-Once we find the NVRAM offset:
-- [ ] Add `nvram_performanceCommon_<param>` handlers in DSP
-- [ ] Add `nvram_part_<partIdx>_<param>` handlers in DSP
-- [ ] Map parameter names to NVRAM offsets (like we did for patches)
-- [ ] Update UI to use these for reading
+### 2. Implement Performance/Part Editing
+- [x] SysEx builders for performance common params (`buildPerformanceCommonParam`)
+- [x] SysEx builders for part params (`buildPartParam`)
+- [x] UI menus for performance common (reverb, chorus, key mode)
+- [x] UI menus for part editing (level, pan, tune, key range, etc.)
+- [ ] Add DSP handlers for reading initial values from temp performance SRAM
+- [ ] Alternatively: parse stored performance structure to initialize values
 
 ### 3. Implement Patch Saving
 Options to investigate:
