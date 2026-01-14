@@ -132,6 +132,7 @@ function getEditPerformanceMenu() {
     const selectedPart = state.selectedPart ?? 0;
 
     return [
+        createSubmenu('Expansion Card', () => getExpansionCardMenu()),
         createSubmenu('Common', () => getPerformanceCommonMenu()),
         createSubmenu(`Part ${selectedPart + 1} Edit`, () => getPartMenu(selectedPart)),
         createSubmenu('All Parts', () => getAllPartsMenu()),
@@ -154,6 +155,35 @@ function getEditPerformanceMenu() {
         ]),
         createBack()
     ];
+}
+
+/* === Expansion Card Menu === */
+function getExpansionCardMenu() {
+    const expansionCount = parseInt(host_module_get_param('expansion_count') || '0');
+    const currentExpansion = parseInt(host_module_get_param('current_expansion') || '-1');
+    const currentName = host_module_get_param('current_expansion_name') || 'None';
+
+    const items = [];
+
+    /* Show current card */
+    items.push(createAction(`Current: ${currentName}`, () => {}));
+
+    /* Option to clear (no card) */
+    items.push(createAction('(No Card)', () => {
+        host_module_set_param('load_expansion', '-1');
+    }));
+
+    /* List available expansions */
+    for (let i = 0; i < expansionCount; i++) {
+        const name = host_module_get_param(`expansion_${i}_name`) || `Expansion ${i + 1}`;
+        const marker = (i === currentExpansion) ? ' ✓' : '';
+        items.push(createAction(`${name}${marker}`, () => {
+            host_module_set_param('load_expansion', String(i));
+        }));
+    }
+
+    items.push(createBack());
+    return items;
 }
 
 /* === Performance Common Menu === */

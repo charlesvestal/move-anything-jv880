@@ -1752,6 +1752,21 @@ static void jv880_set_param(const char *key, const char *val) {
         /* Switch between patch (0) and performance (1) mode */
         int mode = atoi(val);
         set_mode(mode);
+    } else if (strcmp(key, "load_expansion") == 0) {
+        /* Load a specific expansion card by index
+         * This sets which expansion is active for patchnumber 64-127 in performances */
+        int exp_idx = atoi(val);
+        if (exp_idx >= 0 && exp_idx < g_expansion_count) {
+            load_expansion_to_emulator(exp_idx);
+            fprintf(stderr, "JV880: Loaded expansion card: %s\n", g_expansions[exp_idx].name);
+        } else if (exp_idx == -1) {
+            /* -1 means no expansion (clear the card slot) */
+            g_current_expansion = -1;
+            fprintf(stderr, "JV880: Cleared expansion card slot\n");
+        } else {
+            fprintf(stderr, "JV880: Invalid expansion index %d (have %d expansions)\n",
+                    exp_idx, g_expansion_count);
+        }
     } else if (strcmp(key, "performance") == 0) {
         /* Select performance 0-7 */
         int perf = atoi(val);
@@ -2018,6 +2033,30 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
     if (strcmp(key, "bank_count") == 0) {
         snprintf(buf, buf_len, "%d", g_bank_count);
         return 1;
+    }
+    /* Expansion card queries */
+    if (strcmp(key, "expansion_count") == 0) {
+        snprintf(buf, buf_len, "%d", g_expansion_count);
+        return 1;
+    }
+    if (strcmp(key, "current_expansion") == 0) {
+        snprintf(buf, buf_len, "%d", g_current_expansion);
+        return 1;
+    }
+    if (strcmp(key, "current_expansion_name") == 0) {
+        if (g_current_expansion >= 0 && g_current_expansion < g_expansion_count) {
+            snprintf(buf, buf_len, "%s", g_expansions[g_current_expansion].name);
+        } else {
+            snprintf(buf, buf_len, "None");
+        }
+        return 1;
+    }
+    if (strncmp(key, "expansion_", 10) == 0 && strstr(key, "_name")) {
+        int idx = atoi(key + 10);
+        if (idx >= 0 && idx < g_expansion_count) {
+            snprintf(buf, buf_len, "%s", g_expansions[idx].name);
+            return 1;
+        }
     }
     if (strcmp(key, "mode") == 0) {
         snprintf(buf, buf_len, "%d", g_performance_mode);
