@@ -182,29 +182,25 @@ Options to investigate:
 - [x] Load NVRAM on startup (already implemented)
 - [ ] Auto-save on module unload (not yet implemented)
 
-### 6. Expansion + Performance Compatibility (CRITICAL LIMITATION)
+### 6. Expansion + Performance Compatibility (RESOLVED)
 
-**Problem:** JV-880 hardware has only one expansion card slot. Our emulator loads multiple expansions but only one can be "active" in the emulator at a time.
+**Solution implemented:** User can select which expansion card is "installed" from the Performance Edit menu.
 
-**Current behavior:**
-- Selecting a patch from a different expansion triggers `load_expansion_to_emulator()`
-- This copies the expansion ROM to `waverom_exp` and resets the emulator
-- Performances reference patches by patchnumber (0-255):
-  - 0-63: Internal
-  - 64-127: Card (currently loaded expansion)
-  - 128-191: Preset A
-  - 192-255: Preset B
+**How it works:**
+- "Expansion Card" submenu in Performance Edit shows available expansions
+- User selects which expansion to use for this performance
+- Matches real hardware: one card slot, but user chooses which card
+- Patches in patchnumber 64-127 come from the selected expansion
 
-**Consequences:**
-- A performance can only use patches from ONE expansion at a time
-- If Part 1 uses expansion A and Part 2 needs expansion B, they conflict
-- Switching expansions resets the emulator, potentially disrupting playback
+**Behavior:**
+- Patch browsing still works freely (selecting any patch loads its expansion)
+- In Performance mode, parts using patchnumber 64-127 get patches from the selected expansion
+- Switching expansions in performance mode resets the emulator (as on hardware)
 
-**Possible solutions:**
-- [ ] **Option A**: Accept hardware limitation - performances can only use one expansion
-- [ ] **Option B**: Pre-load expansion patch data into temp slots when loading performance
-- [ ] **Option C**: Implement "virtual expansion" that combines patches from multiple ROMs
-- [ ] Document limitation clearly in UI
+**Implementation:**
+- [x] `expansion_count`, `current_expansion`, `expansion_X_name` get_params
+- [x] `load_expansion` set_param to change active expansion
+- [x] "Expansion Card" menu in Performance Edit
 
 ## Resources
 
