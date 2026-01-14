@@ -2105,6 +2105,24 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
             snprintf(buf, buf_len, "%d", next_start - g_bank_starts[idx]);
             return 1;
         }
+        /* Return JV-880 patchnumber base for this bank
+         * JV-880 encoding: 0-63=Internal, 64-127=Card, 128-191=Preset A, 192-255=Preset B */
+        if (strstr(key, "_patchnum_base") && idx >= 0 && idx < g_bank_count) {
+            int base = 0;
+            if (strcmp(g_bank_names[idx], "Preset A") == 0) {
+                base = 128;
+            } else if (strcmp(g_bank_names[idx], "Preset B") == 0) {
+                base = 192;
+            } else if (strcmp(g_bank_names[idx], "Internal") == 0) {
+                base = 0;
+            } else {
+                /* Expansion cards go into the "Card" range (64-127) */
+                /* For now, all expansions share the 64-127 range */
+                base = 64;
+            }
+            snprintf(buf, buf_len, "%d", base);
+            return 1;
+        }
     }
     /* Read tone parameter by name: nvram_tone_<toneIdx>_<paramName>
      * Maps SysEx parameter names to actual NVRAM byte offsets.

@@ -188,6 +188,13 @@ function getStateForModules() {
             }
             return patches;
         },
+        getPatchNumBase: (bankId) => {
+            /* Get JV-880 patchnumber base for this bank
+             * JV-880 encoding: 0-63=Internal, 64-127=Card, 128-191=Preset A, 192-255=Preset B
+             * Note: Only one expansion card (64 patches) can be assigned via patchnumber */
+            const baseStr = host_module_get_param(`bank_${bankId}_patchnum_base`);
+            return baseStr ? parseInt(baseStr) : 0;
+        },
         getPerformanceName: (index) => {
             if (!loadingComplete) {
                 return 'Loading...';
