@@ -574,6 +574,13 @@ static int load_rom(const char *filename, uint8_t *dest, size_t size) {
     return 1;
 }
 
+/* Case-insensitive check for .bin extension */
+static int has_bin_extension(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot) return 0;
+    return (strcasecmp(dot, ".bin") == 0);
+}
+
 /* Unscramble SR-JV expansion ROM (from jv880_juce) */
 static void unscramble_rom(const uint8_t *src, uint8_t *dst, int len) {
     for (int i = 0; i < len; i++) {
@@ -640,7 +647,7 @@ static void scan_expansion_files(void) {
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL && g_expansion_file_count < MAX_EXP_FILES) {
-        if (strstr(entry->d_name, "SR-JV80") && strstr(entry->d_name, ".bin")) {
+        if (strstr(entry->d_name, "SR-JV80") && has_bin_extension(entry->d_name)) {
             strncpy(g_expansion_files[g_expansion_file_count], entry->d_name,
                     sizeof(g_expansion_files[0]) - 1);
 
@@ -652,6 +659,24 @@ static void scan_expansion_files(void) {
         }
     }
     closedir(dir);
+
+    /* Sort file list alphabetically for consistent cache validation */
+    if (g_expansion_file_count > 1) {
+        /* Simple bubble sort for small array - sorts both filenames and sizes together */
+        for (int i = 0; i < g_expansion_file_count - 1; i++) {
+            for (int j = i + 1; j < g_expansion_file_count; j++) {
+                if (strcmp(g_expansion_files[i], g_expansion_files[j]) > 0) {
+                    char tmp_name[256];
+                    strcpy(tmp_name, g_expansion_files[i]);
+                    strcpy(g_expansion_files[i], g_expansion_files[j]);
+                    strcpy(g_expansion_files[j], tmp_name);
+                    uint32_t tmp_size = g_expansion_sizes[i];
+                    g_expansion_sizes[i] = g_expansion_sizes[j];
+                    g_expansion_sizes[j] = tmp_size;
+                }
+            }
+        }
+    }
 }
 
 /* Save patch cache to file */
@@ -899,6 +924,13 @@ static int scan_expansion_rom(const char *filename, ExpansionInfo *info) {
     return 1;
 }
 
+/* Comparison function for sorting expansions by name */
+static int compare_expansions(const void *a, const void *b) {
+    const ExpansionInfo *ea = (const ExpansionInfo *)a;
+    const ExpansionInfo *eb = (const ExpansionInfo *)b;
+    return strcmp(ea->name, eb->name);
+}
+
 /* Scan for expansion ROMs and build patch list */
 static void scan_expansions(void) {
     char exp_dir[1024];
@@ -913,13 +945,18 @@ static void scan_expansions(void) {
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL && g_expansion_count < MAX_EXPANSIONS) {
         /* Look for .bin files starting with SR-JV80 */
-        if (strstr(entry->d_name, "SR-JV80") && strstr(entry->d_name, ".bin")) {
+        if (strstr(entry->d_name, "SR-JV80") && has_bin_extension(entry->d_name)) {
             if (scan_expansion_rom(entry->d_name, &g_expansions[g_expansion_count])) {
                 g_expansion_count++;
             }
         }
     }
     closedir(dir);
+
+    /* Sort expansions alphabetically by name (01 Pop, 06 Dance, etc.) */
+    if (g_expansion_count > 1) {
+        qsort(g_expansions, g_expansion_count, sizeof(ExpansionInfo), compare_expansions);
+    }
 
     fprintf(stderr, "JV880: Found %d expansion ROMs\n", g_expansion_count);
 }
