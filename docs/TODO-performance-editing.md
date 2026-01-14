@@ -9,11 +9,12 @@ This document tracks the work needed to fully support performance editing and pa
 - SysEx DT1 parameter writing (affects temp patch in real-time)
 - Patch browsing and loading from ROM
 - Performance browsing and loading
+- Performance name reading from ROM2/NVRAM
 
 **Not Working:**
-- Performance NVRAM reading (unknown address)
+- Performance parameter reading/writing (common + part params)
 - Patch saving to permanent storage
-- Performance parameter reading/writing
+- Performance saving to permanent storage
 
 ## SysEx Address Map (from Edisyn)
 
@@ -35,16 +36,35 @@ This document tracks the work needed to fully support performance editing and pa
 | 0x0002 | 1 | Reverb/Chorus flags |
 | 0x000d | 1 | System settings (bit 5: LastSet) |
 | 0x0011 | 1 | Mode flag (0=performance, 1=patch) |
+| 0x00b0 | 3264 | Internal Performances (16 × 204 bytes) |
 | 0x0d70 | 362 | Temporary Patch data |
 | 0x67f0 | 2684 | Drum kit data |
-| ?????? | ??? | Performance data (TO BE FOUND) |
+
+## Performance Data Locations (DISCOVERED)
+
+**Performance size: 0xCC (204 bytes)**
+**Performance name: first 12 bytes**
+
+| Bank | Location | Start Offset | Notes |
+|------|----------|--------------|-------|
+| Preset A | ROM2 | 0x10020 | "Jazz Split", "Softly...", etc. |
+| Preset B | ROM2 | 0x18020 | "GTR Players", "YMBA Choir", etc. |
+| Internal | NVRAM | 0x000b0 | "Syn Lead", "Encounter X", "Brass ComeOn", etc. |
+
+ROM2 structure at 0x10000:
+- 0x10000: ROM signature "Roland JV-80D"
+- 0x10010: Bank header "JV-80 Preset A  " (16 bytes)
+- 0x10020: First performance (204 bytes each)
+
+Internal performances end at 0x0d70 (0x00b0 + 16×0xCC = 0x0d70), right where temp patch begins.
 
 ## Implementation Tasks
 
 ### 1. Find Performance NVRAM Location
-- [ ] Search mini-jv880 source for performance data handling
-- [ ] Experiment by loading performances and dumping NVRAM
-- [ ] Check if jv880_juce has any clues
+- [x] Search mini-jv880 source for performance data handling
+- [x] Experiment by loading performances and dumping NVRAM
+- [x] Check if jv880_juce has any clues
+- [x] **FOUND**: See "Performance Data Locations" above
 
 ### 2. Implement Performance Reading
 Once we find the NVRAM offset:

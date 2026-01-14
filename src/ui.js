@@ -188,6 +188,9 @@ function getStateForModules() {
             return patches;
         },
         getPerformanceName: (index) => {
+            if (!loadingComplete) {
+                return 'Loading...';
+            }
             return host_module_get_param(`perf_${index}_name`) || `Perf ${index + 1}`;
         },
         loadPatch: (bankId, patchIndex) => {
