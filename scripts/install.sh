@@ -37,6 +37,10 @@ if [ -d "src/chain_patches" ]; then
     scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/modules/chain/patches/
 fi
 
+# Set permissions so Module Store can update later
+echo "Setting permissions..."
+ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/jv880"
+
 echo ""
 echo "=== Install Complete ==="
 echo "Module installed to: /data/UserData/move-anything/modules/jv880/"
