@@ -2735,3 +2735,1039 @@ extern "C" plugin_api_v1_t* move_plugin_init_v1(const host_api_v1_t *host) {
     (void)host;
     return &jv880_api;
 }
+
+/* ========================================================================
+ * PLUGIN API V2 - INSTANCE-BASED (for multi-instance support)
+ *
+ * Note: JV880 is extremely resource-intensive (emulator, ROMs, threads).
+ * Multiple simultaneous instances are technically possible but may cause
+ * performance issues on limited hardware.
+ * ======================================================================== */
+
+/* v2 instance structure containing ALL state (for true multi-instance) */
+typedef struct {
+    /* Module path */
+    char module_dir[512];
+
+    /* Emulator */
+    MCU *mcu;
+    int initialized;
+    int rom_loaded;
+
+    /* ROM data */
+    uint8_t *rom2;
+
+    /* Debug/SysEx */
+    int debug_sysex;
+    uint8_t sysex_buf[512];
+    int sysex_len;
+    int sysex_capture;
+
+    /* Expansions */
+    ExpansionInfo expansions[MAX_EXPANSIONS];
+    int expansion_count;
+    int current_expansion;
+    int expansion_bank_offset;
+
+    /* Expansion file tracking */
+    char expansion_files[MAX_EXP_FILES][256];
+    uint32_t expansion_sizes[MAX_EXP_FILES];
+    int expansion_file_count;
+
+    /* Patches */
+    PatchInfo patches[MAX_TOTAL_PATCHES];
+    int total_patches;
+    int current_patch;
+
+    /* Banks */
+    int bank_starts[MAX_BANKS];
+    char bank_names[MAX_BANKS][64];
+    int bank_count;
+
+    /* Performance mode */
+    int performance_mode;
+    int current_performance;
+    int current_part;
+    int perf_bank;
+
+    /* Loading state */
+    char loading_status[256];
+    int loading_complete;
+    int loading_phase;
+    int loading_subindex;
+    int warmup_count;
+
+    /* Parameter mapping */
+    int map_active;
+    int map_phase;
+    int map_mode;
+    int map_part;
+    int map_param_idx;
+    int map_wait_cycles;
+    int map_test_pass;
+    uint8_t map_sram_snapshot[MAP_SRAM_SCAN_SIZE];
+    uint8_t map_sysex_pending[16];
+    int map_sysex_len;
+    int map_last_offset;
+
+    /* SRAM scanning */
+    int sram_scan_countdown;
+    int found_perf_sram_offset;
+
+    /* Threading */
+    pthread_t emu_thread;
+    volatile int thread_running;
+    pthread_t load_thread;
+    volatile int load_thread_running;
+
+    /* Audio ring buffer */
+    int16_t audio_ring[AUDIO_RING_SIZE * 2];
+    volatile int ring_write;
+    volatile int ring_read;
+    pthread_mutex_t ring_mutex;
+
+    /* MIDI queue */
+    uint8_t midi_queue[MIDI_QUEUE_SIZE][MIDI_MSG_MAX_LEN];
+    int midi_queue_len[MIDI_QUEUE_SIZE];
+    volatile int midi_write;
+    volatile int midi_read;
+
+    /* Other settings */
+    int octave_transpose;
+} jv880_instance_t;
+
+/* Forward declarations for v2 helper functions */
+static int v2_load_rom(jv880_instance_t *inst, const char *filename, uint8_t *dest, size_t size);
+static void* v2_load_thread_func(void *arg);
+static void* v2_emu_thread_func(void *arg);
+/* Forward declarations for v2 expansion functions */
+static void v2_scan_expansion_files(jv880_instance_t *inst);
+static int v2_load_cache(jv880_instance_t *inst);
+static void v2_save_cache(jv880_instance_t *inst);
+static int v2_scan_expansion_rom(jv880_instance_t *inst, const char *filename, ExpansionInfo *info);
+static void v2_scan_expansions(jv880_instance_t *inst);
+static void v2_build_patch_list(jv880_instance_t *inst);
+static int v2_load_expansion_data(jv880_instance_t *inst, int exp_index);
+static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index);
+static void v2_select_patch(jv880_instance_t *inst, int global_index);
+static void v2_send_all_notes_off(jv880_instance_t *inst);
+
+/* v2: Get file size helper */
+static uint32_t v2_get_file_size(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    uint32_t size = ftell(f);
+    fclose(f);
+    return size;
+}
+
+/* v2: Scan for expansion ROM files */
+static void v2_scan_expansion_files(jv880_instance_t *inst) {
+    char exp_dir[1024];
+    snprintf(exp_dir, sizeof(exp_dir), "%s/roms/expansions", inst->module_dir);
+
+    inst->expansion_file_count = 0;
+
+    DIR *dir = opendir(exp_dir);
+    if (!dir) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && inst->expansion_file_count < MAX_EXP_FILES) {
+        if (strstr(entry->d_name, "SR-JV80") && has_bin_extension(entry->d_name)) {
+            strncpy(inst->expansion_files[inst->expansion_file_count], entry->d_name,
+                    sizeof(inst->expansion_files[0]) - 1);
+
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%s", exp_dir, entry->d_name);
+            inst->expansion_sizes[inst->expansion_file_count] = v2_get_file_size(path);
+
+            inst->expansion_file_count++;
+        }
+    }
+    closedir(dir);
+
+    /* Sort alphabetically */
+    if (inst->expansion_file_count > 1) {
+        for (int i = 0; i < inst->expansion_file_count - 1; i++) {
+            for (int j = i + 1; j < inst->expansion_file_count; j++) {
+                if (strcmp(inst->expansion_files[i], inst->expansion_files[j]) > 0) {
+                    char tmp_name[256];
+                    strcpy(tmp_name, inst->expansion_files[i]);
+                    strcpy(inst->expansion_files[i], inst->expansion_files[j]);
+                    strcpy(inst->expansion_files[j], tmp_name);
+                    uint32_t tmp_size = inst->expansion_sizes[i];
+                    inst->expansion_sizes[i] = inst->expansion_sizes[j];
+                    inst->expansion_sizes[j] = tmp_size;
+                }
+            }
+        }
+    }
+}
+
+/* v2: Scan a single expansion ROM */
+static int v2_scan_expansion_rom(jv880_instance_t *inst, const char *filename, ExpansionInfo *info) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/roms/expansions/%s", inst->module_dir, filename);
+
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Scanning: %.40s", filename);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    uint32_t rom_size = 0;
+    if (size == EXPANSION_SIZE_8MB) {
+        rom_size = EXPANSION_SIZE_8MB;
+    } else if (size == EXPANSION_SIZE_2MB) {
+        rom_size = EXPANSION_SIZE_2MB;
+    } else {
+        fprintf(stderr, "JV880 v2: Skipping %s (wrong size)\n", filename);
+        fclose(f);
+        return 0;
+    }
+
+    uint8_t *scrambled = (uint8_t *)malloc(rom_size);
+    uint8_t *unscrambled_data = (uint8_t *)malloc(rom_size);
+    if (!scrambled || !unscrambled_data) {
+        free(scrambled);
+        free(unscrambled_data);
+        fclose(f);
+        return 0;
+    }
+
+    fread(scrambled, 1, rom_size, f);
+    fclose(f);
+
+    unscramble_rom(scrambled, unscrambled_data, rom_size);
+    free(scrambled);
+
+    int patch_count = unscrambled_data[0x67] | (unscrambled_data[0x66] << 8);
+    uint32_t patches_offset = unscrambled_data[0x8f] |
+                              (unscrambled_data[0x8e] << 8) |
+                              (unscrambled_data[0x8d] << 16) |
+                              (unscrambled_data[0x8c] << 24);
+
+    if (patch_count <= 0 || patch_count > MAX_PATCHES_PER_EXP || patches_offset >= rom_size) {
+        fprintf(stderr, "JV880 v2: Invalid expansion %s\n", filename);
+        free(unscrambled_data);
+        return 0;
+    }
+
+    strncpy(info->filename, filename, sizeof(info->filename) - 1);
+    extract_expansion_name(filename, info->name, sizeof(info->name));
+    info->patch_count = patch_count;
+    info->patches_offset = patches_offset;
+    info->rom_size = rom_size;
+    info->unscrambled = unscrambled_data;
+
+    fprintf(stderr, "JV880 v2: Scanned %s: %d patches\n", info->name, patch_count);
+    return 1;
+}
+
+/* v2: Compare expansions for sorting */
+static int v2_compare_expansions(const void *a, const void *b) {
+    return strcmp(((ExpansionInfo*)a)->name, ((ExpansionInfo*)b)->name);
+}
+
+/* v2: Scan all expansions */
+static void v2_scan_expansions(jv880_instance_t *inst) {
+    char exp_dir[1024];
+    snprintf(exp_dir, sizeof(exp_dir), "%s/roms/expansions", inst->module_dir);
+
+    DIR *dir = opendir(exp_dir);
+    if (!dir) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && inst->expansion_count < MAX_EXPANSIONS) {
+        if (strstr(entry->d_name, "SR-JV80") && has_bin_extension(entry->d_name)) {
+            if (v2_scan_expansion_rom(inst, entry->d_name, &inst->expansions[inst->expansion_count])) {
+                inst->expansion_count++;
+            }
+        }
+    }
+    closedir(dir);
+
+    if (inst->expansion_count > 1) {
+        qsort(inst->expansions, inst->expansion_count, sizeof(ExpansionInfo), v2_compare_expansions);
+    }
+
+    fprintf(stderr, "JV880 v2: Found %d expansions\n", inst->expansion_count);
+}
+
+/* v2: Build complete patch list with expansions */
+static void v2_build_patch_list(jv880_instance_t *inst) {
+    inst->total_patches = 0;
+    inst->bank_count = 0;
+
+    /* Preset Bank A (0-63) */
+    inst->bank_starts[inst->bank_count] = inst->total_patches;
+    strncpy(inst->bank_names[inst->bank_count], "Preset A", sizeof(inst->bank_names[0]) - 1);
+    inst->bank_count++;
+
+    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &inst->patches[inst->total_patches];
+        uint32_t offset = PATCH_OFFSET_PRESET_A + (i * PATCH_SIZE);
+        memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+        p->expansion_index = -1;
+        p->local_patch_index = i;
+        p->rom_offset = offset;
+        inst->total_patches++;
+    }
+
+    /* Preset Bank B (64-127) */
+    inst->bank_starts[inst->bank_count] = inst->total_patches;
+    strncpy(inst->bank_names[inst->bank_count], "Preset B", sizeof(inst->bank_names[0]) - 1);
+    inst->bank_count++;
+
+    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &inst->patches[inst->total_patches];
+        uint32_t offset = PATCH_OFFSET_PRESET_B + (i * PATCH_SIZE);
+        memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+        p->expansion_index = -1;
+        p->local_patch_index = 64 + i;
+        p->rom_offset = offset;
+        inst->total_patches++;
+    }
+
+    /* Internal Bank (128-191) */
+    inst->bank_starts[inst->bank_count] = inst->total_patches;
+    strncpy(inst->bank_names[inst->bank_count], "Internal", sizeof(inst->bank_names[0]) - 1);
+    inst->bank_count++;
+
+    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+        PatchInfo *p = &inst->patches[inst->total_patches];
+        uint32_t offset = PATCH_OFFSET_INTERNAL + (i * PATCH_SIZE);
+        memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
+        p->name[PATCH_NAME_LEN] = '\0';
+        p->expansion_index = -1;
+        p->local_patch_index = 128 + i;
+        p->rom_offset = offset;
+        inst->total_patches++;
+    }
+
+    /* Expansion patches */
+    for (int e = 0; e < inst->expansion_count && inst->bank_count < MAX_BANKS; e++) {
+        ExpansionInfo *exp = &inst->expansions[e];
+        exp->first_global_index = inst->total_patches;
+
+        inst->bank_starts[inst->bank_count] = inst->total_patches;
+        strncpy(inst->bank_names[inst->bank_count], exp->name, sizeof(inst->bank_names[0]) - 1);
+        inst->bank_count++;
+
+        for (int i = 0; i < exp->patch_count && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+            PatchInfo *p = &inst->patches[inst->total_patches];
+            uint32_t offset = exp->patches_offset + (i * PATCH_SIZE);
+
+            if (exp->unscrambled) {
+                memcpy(p->name, &exp->unscrambled[offset], PATCH_NAME_LEN);
+                p->name[PATCH_NAME_LEN] = '\0';
+            } else {
+                snprintf(p->name, sizeof(p->name), "Patch %d", i);
+            }
+
+            p->expansion_index = e;
+            p->local_patch_index = i;
+            p->rom_offset = offset;
+            inst->total_patches++;
+        }
+    }
+
+    fprintf(stderr, "JV880 v2: Total patches: %d (192 internal + %d expansion) in %d banks\n",
+            inst->total_patches, inst->total_patches - 192, inst->bank_count);
+}
+
+/* v2: Load expansion data on demand */
+static int v2_load_expansion_data(jv880_instance_t *inst, int exp_index) {
+    if (exp_index < 0 || exp_index >= inst->expansion_count) return 0;
+
+    ExpansionInfo *exp = &inst->expansions[exp_index];
+    if (exp->unscrambled) return 1;
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/roms/expansions/%s", inst->module_dir, exp->filename);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+
+    uint8_t *scrambled = (uint8_t *)malloc(exp->rom_size);
+    uint8_t *unscrambled_data = (uint8_t *)malloc(exp->rom_size);
+    if (!scrambled || !unscrambled_data) {
+        free(scrambled);
+        free(unscrambled_data);
+        fclose(f);
+        return 0;
+    }
+
+    fread(scrambled, 1, exp->rom_size, f);
+    fclose(f);
+
+    unscramble_rom(scrambled, unscrambled_data, exp->rom_size);
+    free(scrambled);
+
+    exp->unscrambled = unscrambled_data;
+    fprintf(stderr, "JV880 v2: Loaded expansion %s on demand\n", exp->name);
+    return 1;
+}
+
+/* v2: Send all notes off */
+static void v2_send_all_notes_off(jv880_instance_t *inst) {
+    for (int ch = 0; ch < 16; ch++) {
+        uint8_t msg[3] = { (uint8_t)(0xB0 | ch), 123, 0 };
+        int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+        if (next != inst->midi_read) {
+            memcpy(inst->midi_queue[inst->midi_write], msg, 3);
+            inst->midi_queue_len[inst->midi_write] = 3;
+            inst->midi_write = next;
+        }
+    }
+}
+
+/* v2: Load expansion to emulator */
+static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index) {
+    if (exp_index < 0 || exp_index >= inst->expansion_count) return;
+    if (exp_index == inst->current_expansion) return;
+
+    ExpansionInfo *exp = &inst->expansions[exp_index];
+
+    if (!exp->unscrambled) {
+        if (!v2_load_expansion_data(inst, exp_index)) return;
+    }
+
+    v2_send_all_notes_off(inst);
+    memset(inst->mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
+    memcpy(inst->mcu->pcm.waverom_exp, exp->unscrambled, exp->rom_size);
+
+    inst->current_expansion = exp_index;
+    inst->mcu->SC55_Reset();
+    fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator\n", exp->name);
+}
+
+/* v2: Select a patch */
+static void v2_select_patch(jv880_instance_t *inst, int global_index) {
+    if (global_index < 0 || global_index >= inst->total_patches) return;
+
+    PatchInfo *p = &inst->patches[global_index];
+    inst->current_patch = global_index;
+
+    if (p->expansion_index >= 0) {
+        v2_load_expansion_to_emulator(inst, p->expansion_index);
+        ExpansionInfo *exp = &inst->expansions[p->expansion_index];
+        if (exp->unscrambled) {
+            memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET],
+                   &exp->unscrambled[p->rom_offset], PATCH_SIZE);
+        }
+    } else {
+        memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET], &inst->rom2[p->rom_offset], PATCH_SIZE);
+    }
+
+    inst->mcu->nvram[NVRAM_MODE_OFFSET] = 1;
+
+    uint8_t pc_msg[2] = { 0xC0, 0x00 };
+    int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != inst->midi_read) {
+        memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
+        inst->midi_queue_len[inst->midi_write] = 2;
+        inst->midi_write = next;
+    }
+
+    fprintf(stderr, "JV880 v2: Selected patch %d: %s\n", global_index, p->name);
+}
+
+/* v2: Save cache */
+static void v2_save_cache(jv880_instance_t *inst) {
+    char cache_path[1024];
+    snprintf(cache_path, sizeof(cache_path), "%s/roms/%s", inst->module_dir, CACHE_FILENAME);
+
+    FILE *f = fopen(cache_path, "wb");
+    if (!f) return;
+
+    CacheHeader hdr;
+    hdr.magic = CACHE_MAGIC;
+    hdr.version = CACHE_VERSION;
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/roms/jv880_rom1.bin", inst->module_dir);
+    hdr.rom1_size = v2_get_file_size(path);
+    snprintf(path, sizeof(path), "%s/roms/jv880_rom2.bin", inst->module_dir);
+    hdr.rom2_size = v2_get_file_size(path);
+    snprintf(path, sizeof(path), "%s/roms/jv880_waverom1.bin", inst->module_dir);
+    hdr.waverom1_size = v2_get_file_size(path);
+    snprintf(path, sizeof(path), "%s/roms/jv880_waverom2.bin", inst->module_dir);
+    hdr.waverom2_size = v2_get_file_size(path);
+
+    hdr.expansion_count = inst->expansion_count;
+    hdr.total_patches = inst->total_patches;
+    hdr.bank_count = inst->bank_count;
+
+    fwrite(&hdr, sizeof(hdr), 1, f);
+    fwrite(&inst->expansion_file_count, sizeof(inst->expansion_file_count), 1, f);
+    for (int i = 0; i < inst->expansion_file_count; i++) {
+        fwrite(inst->expansion_files[i], sizeof(inst->expansion_files[0]), 1, f);
+        fwrite(&inst->expansion_sizes[i], sizeof(inst->expansion_sizes[0]), 1, f);
+    }
+
+    for (int i = 0; i < inst->expansion_count; i++) {
+        fwrite(inst->expansions[i].filename, sizeof(inst->expansions[i].filename), 1, f);
+        fwrite(inst->expansions[i].name, sizeof(inst->expansions[i].name), 1, f);
+        fwrite(&inst->expansions[i].patch_count, sizeof(inst->expansions[i].patch_count), 1, f);
+        fwrite(&inst->expansions[i].patches_offset, sizeof(inst->expansions[i].patches_offset), 1, f);
+        fwrite(&inst->expansions[i].first_global_index, sizeof(inst->expansions[i].first_global_index), 1, f);
+        fwrite(&inst->expansions[i].rom_size, sizeof(inst->expansions[i].rom_size), 1, f);
+    }
+
+    fwrite(inst->patches, sizeof(PatchInfo), inst->total_patches, f);
+    fwrite(inst->bank_starts, sizeof(inst->bank_starts[0]), inst->bank_count, f);
+    fwrite(inst->bank_names, sizeof(inst->bank_names[0]), inst->bank_count, f);
+
+    fclose(f);
+    fprintf(stderr, "JV880 v2: Saved cache\n");
+}
+
+/* v2: Load cache */
+static int v2_load_cache(jv880_instance_t *inst) {
+    char cache_path[1024];
+    snprintf(cache_path, sizeof(cache_path), "%s/roms/%s", inst->module_dir, CACHE_FILENAME);
+
+    FILE *f = fopen(cache_path, "rb");
+    if (!f) return 0;
+
+    CacheHeader hdr;
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1 ||
+        hdr.magic != CACHE_MAGIC ||
+        hdr.version != CACHE_VERSION) {
+        fclose(f);
+        return 0;
+    }
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/roms/jv880_rom1.bin", inst->module_dir);
+    if (v2_get_file_size(path) != hdr.rom1_size) { fclose(f); return 0; }
+    snprintf(path, sizeof(path), "%s/roms/jv880_rom2.bin", inst->module_dir);
+    if (v2_get_file_size(path) != hdr.rom2_size) { fclose(f); return 0; }
+    snprintf(path, sizeof(path), "%s/roms/jv880_waverom1.bin", inst->module_dir);
+    if (v2_get_file_size(path) != hdr.waverom1_size) { fclose(f); return 0; }
+    snprintf(path, sizeof(path), "%s/roms/jv880_waverom2.bin", inst->module_dir);
+    if (v2_get_file_size(path) != hdr.waverom2_size) { fclose(f); return 0; }
+
+    int cached_exp_count;
+    if (fread(&cached_exp_count, sizeof(cached_exp_count), 1, f) != 1 ||
+        cached_exp_count != inst->expansion_file_count) {
+        fclose(f);
+        return 0;
+    }
+
+    for (int i = 0; i < cached_exp_count; i++) {
+        char cached_name[256];
+        uint32_t cached_size;
+        fread(cached_name, sizeof(cached_name), 1, f);
+        fread(&cached_size, sizeof(cached_size), 1, f);
+
+        int found = 0;
+        for (int j = 0; j < inst->expansion_file_count; j++) {
+            if (strcmp(cached_name, inst->expansion_files[j]) == 0 &&
+                cached_size == inst->expansion_sizes[j]) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) { fclose(f); return 0; }
+    }
+
+    inst->expansion_count = hdr.expansion_count;
+    inst->total_patches = hdr.total_patches;
+    inst->bank_count = hdr.bank_count;
+
+    for (int i = 0; i < inst->expansion_count; i++) {
+        fread(inst->expansions[i].filename, sizeof(inst->expansions[i].filename), 1, f);
+        fread(inst->expansions[i].name, sizeof(inst->expansions[i].name), 1, f);
+        fread(&inst->expansions[i].patch_count, sizeof(inst->expansions[i].patch_count), 1, f);
+        fread(&inst->expansions[i].patches_offset, sizeof(inst->expansions[i].patches_offset), 1, f);
+        fread(&inst->expansions[i].first_global_index, sizeof(inst->expansions[i].first_global_index), 1, f);
+        fread(&inst->expansions[i].rom_size, sizeof(inst->expansions[i].rom_size), 1, f);
+        inst->expansions[i].unscrambled = nullptr;
+    }
+
+    fread(inst->patches, sizeof(PatchInfo), inst->total_patches, f);
+    fread(inst->bank_starts, sizeof(inst->bank_starts[0]), inst->bank_count, f);
+    fread(inst->bank_names, sizeof(inst->bank_names[0]), inst->bank_count, f);
+
+    fclose(f);
+    fprintf(stderr, "JV880 v2: Loaded cache (%d patches, %d banks, %d expansions)\n",
+            inst->total_patches, inst->bank_count, inst->expansion_count);
+    return 1;
+}
+
+/* v2: Load thread function */
+static void* v2_load_thread_func(void *arg) {
+    jv880_instance_t *inst = (jv880_instance_t*)arg;
+
+    fprintf(stderr, "JV880 v2: Load thread started\n");
+
+    /* Scan for expansion files */
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Checking expansions...");
+    v2_scan_expansion_files(inst);
+    fprintf(stderr, "JV880 v2: Found %d expansion files\n", inst->expansion_file_count);
+
+    /* Try cache first */
+    int cache_valid = v2_load_cache(inst);
+
+    if (!cache_valid) {
+        fprintf(stderr, "JV880 v2: Cache miss, scanning expansions...\n");
+        snprintf(inst->loading_status, sizeof(inst->loading_status), "Scanning expansions...");
+        v2_scan_expansions(inst);
+        v2_build_patch_list(inst);
+        v2_save_cache(inst);
+    }
+
+    /* Select initial patch */
+    if (inst->total_patches > 0) {
+        v2_select_patch(inst, 0);
+    }
+
+    /* Warmup */
+    fprintf(stderr, "JV880 v2: Running warmup...\n");
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Warming up...");
+    for (int i = 0; i < 100000; i++) {
+        inst->mcu->updateSC55(1);
+    }
+    fprintf(stderr, "JV880 v2: Warmup done\n");
+
+    /* Pre-fill audio buffer */
+    inst->ring_write = 0;
+    inst->ring_read = 0;
+
+    BiquadFilter aa_filter;
+    biquad_init(&aa_filter);
+    const double step = (double)JV880_SAMPLE_RATE / (double)MOVE_SAMPLE_RATE;
+    double resample_pos = 0.0;
+    double prev_l = 0.0, prev_r = 0.0;
+    double curr_l = 0.0, curr_r = 0.0;
+
+    fprintf(stderr, "JV880 v2: Pre-filling buffer...\n");
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Preparing audio...");
+    for (int i = 0; i < 256 && inst->ring_write < AUDIO_RING_SIZE / 2; i++) {
+        inst->mcu->updateSC55(8);
+        int avail = inst->mcu->sample_write_ptr;
+
+        for (int j = 0; j < avail && inst->ring_write < AUDIO_RING_SIZE / 2; j += 2) {
+            double in_l = (double)inst->mcu->sample_buffer[j];
+            double in_r = (double)inst->mcu->sample_buffer[j + 1];
+            double filt_l, filt_r;
+            biquad_process(&aa_filter, in_l, in_r, &filt_l, &filt_r);
+
+            prev_l = curr_l;
+            prev_r = curr_r;
+            curr_l = filt_l;
+            curr_r = filt_r;
+            resample_pos += 1.0;
+
+            while (resample_pos >= step && inst->ring_write < AUDIO_RING_SIZE / 2) {
+                resample_pos -= step;
+                double t = 1.0 - (resample_pos / 1.0);
+                if (t < 0.0) t = 0.0;
+                if (t > 1.0) t = 1.0;
+
+                inst->audio_ring[inst->ring_write * 2 + 0] = (int32_t)(prev_l + t * (curr_l - prev_l));
+                inst->audio_ring[inst->ring_write * 2 + 1] = (int32_t)(prev_r + t * (curr_r - prev_r));
+                inst->ring_write = (inst->ring_write + 1) % AUDIO_RING_SIZE;
+            }
+        }
+    }
+    fprintf(stderr, "JV880 v2: Buffer pre-filled: %d samples\n", inst->ring_write);
+
+    /* Start emulation thread */
+    inst->thread_running = 1;
+    pthread_create(&inst->emu_thread, NULL, v2_emu_thread_func, inst);
+
+    inst->initialized = 1;
+    inst->loading_complete = 1;
+    snprintf(inst->loading_status, sizeof(inst->loading_status),
+             "Ready: %d patches in %d banks", inst->total_patches, inst->bank_count);
+
+    fprintf(stderr, "JV880 v2: Ready!\n");
+    inst->load_thread_running = 0;
+    return NULL;
+}
+
+/* v2: Create instance */
+static void* v2_create_instance(const char *module_dir, const char *json_defaults) {
+    (void)json_defaults;
+
+    jv880_instance_t *inst = (jv880_instance_t*)calloc(1, sizeof(jv880_instance_t));
+    if (!inst) {
+        fprintf(stderr, "JV880 v2: Failed to allocate instance\n");
+        return NULL;
+    }
+
+    strncpy(inst->module_dir, module_dir, sizeof(inst->module_dir) - 1);
+    fprintf(stderr, "JV880 v2: Loading from %s\n", module_dir);
+
+    /* Check for debug mode */
+    char debug_path[1024];
+    snprintf(debug_path, sizeof(debug_path), "%s/debug_sysex_test", module_dir);
+    if (access(debug_path, F_OK) == 0) {
+        inst->debug_sysex = 1;
+        fprintf(stderr, "JV880 v2: SysEx debug enabled\n");
+    }
+
+    /* Initialize mutex */
+    pthread_mutex_init(&inst->ring_mutex, NULL);
+
+    /* Initialize loading status */
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Initializing...");
+    inst->current_expansion = -1;
+    inst->found_perf_sram_offset = -1;
+    inst->map_last_offset = -1;
+
+    /* Create emulator instance */
+    inst->mcu = new MCU();
+
+    /* Load ROMs */
+    uint8_t *rom1 = (uint8_t *)malloc(ROM1_SIZE);
+    uint8_t *rom2 = (uint8_t *)malloc(ROM2_SIZE);
+    uint8_t *waverom1 = (uint8_t *)malloc(0x200000);
+    uint8_t *waverom2 = (uint8_t *)malloc(0x200000);
+    uint8_t *nvram = (uint8_t *)malloc(NVRAM_SIZE);
+
+    if (!rom1 || !rom2 || !waverom1 || !waverom2 || !nvram) {
+        fprintf(stderr, "JV880 v2: Memory allocation failed\n");
+        free(rom1); free(rom2); free(waverom1); free(waverom2); free(nvram);
+        delete inst->mcu;
+        pthread_mutex_destroy(&inst->ring_mutex);
+        free(inst);
+        return NULL;
+    }
+
+    memset(nvram, 0xFF, NVRAM_SIZE);
+
+    int ok = 1;
+    ok = ok && v2_load_rom(inst, "jv880_rom1.bin", rom1, ROM1_SIZE);
+    ok = ok && v2_load_rom(inst, "jv880_rom2.bin", rom2, ROM2_SIZE);
+    ok = ok && v2_load_rom(inst, "jv880_waverom1.bin", waverom1, 0x200000);
+    ok = ok && v2_load_rom(inst, "jv880_waverom2.bin", waverom2, 0x200000);
+
+    /* NVRAM is optional */
+    char nvram_path[1024];
+    snprintf(nvram_path, sizeof(nvram_path), "%s/roms/jv880_nvram.bin", module_dir);
+    FILE *nf = fopen(nvram_path, "rb");
+    if (nf) {
+        fread(nvram, 1, NVRAM_SIZE, nf);
+        fclose(nf);
+        fprintf(stderr, "JV880 v2: Loaded NVRAM\n");
+    }
+
+    if (!ok) {
+        fprintf(stderr, "JV880 v2: ROM loading failed\n");
+        free(rom1); free(rom2); free(waverom1); free(waverom2); free(nvram);
+        delete inst->mcu;
+        pthread_mutex_destroy(&inst->ring_mutex);
+        free(inst);
+        return NULL;
+    }
+
+    /* Initialize emulator */
+    inst->mcu->startSC55(rom1, rom2, waverom1, waverom2, nvram);
+
+    /* Keep ROM2 for internal patch access */
+    inst->rom2 = rom2;
+
+    free(rom1); free(waverom1); free(waverom2); free(nvram);
+
+    inst->rom_loaded = 1;
+
+    /* Set patch mode */
+    inst->mcu->nvram[NVRAM_MODE_OFFSET] = 1;
+
+    /* Load patches/expansions and warmup in background */
+    inst->load_thread_running = 1;
+    pthread_create(&inst->load_thread, NULL, v2_load_thread_func, inst);
+
+    fprintf(stderr, "JV880 v2: Instance created\n");
+    return inst;
+}
+
+/* v2: Destroy instance */
+static void v2_destroy_instance(void *instance) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst) return;
+
+    fprintf(stderr, "JV880 v2: Destroying instance\n");
+
+    /* Stop load thread */
+    if (inst->load_thread_running) {
+        inst->load_thread_running = 0;
+        pthread_join(inst->load_thread, NULL);
+    }
+
+    /* Stop emulator thread */
+    if (inst->thread_running) {
+        inst->thread_running = 0;
+        pthread_join(inst->emu_thread, NULL);
+    }
+
+    /* Cleanup emulator */
+    if (inst->mcu) {
+        delete inst->mcu;
+        inst->mcu = nullptr;
+    }
+
+    /* Free ROM2 */
+    if (inst->rom2) {
+        free(inst->rom2);
+        inst->rom2 = nullptr;
+    }
+
+    /* Free expansion data */
+    for (int i = 0; i < inst->expansion_count; i++) {
+        if (inst->expansions[i].unscrambled) {
+            free(inst->expansions[i].unscrambled);
+            inst->expansions[i].unscrambled = nullptr;
+        }
+    }
+
+    pthread_mutex_destroy(&inst->ring_mutex);
+    free(inst);
+    fprintf(stderr, "JV880 v2: Instance destroyed\n");
+}
+
+/* v2: Load ROM helper */
+static int v2_load_rom(jv880_instance_t *inst, const char *filename, uint8_t *dest, size_t size) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/roms/%s", inst->module_dir, filename);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "JV880 v2: Cannot open: %s\n", path);
+        return 0;
+    }
+
+    size_t got = fread(dest, 1, size, f);
+    fclose(f);
+
+    if (got != size) {
+        fprintf(stderr, "JV880 v2: Size mismatch: %s (%zu vs %zu)\n", filename, got, size);
+        return 0;
+    }
+
+    fprintf(stderr, "JV880 v2: Loaded %s\n", filename);
+    return 1;
+}
+
+/* v2: Ring buffer helpers (instance-based) */
+static int v2_ring_available(jv880_instance_t *inst) {
+    int avail = inst->ring_write - inst->ring_read;
+    if (avail < 0) avail += AUDIO_RING_SIZE;
+    return avail;
+}
+
+static int v2_ring_free(jv880_instance_t *inst) {
+    return AUDIO_RING_SIZE - 1 - v2_ring_available(inst);
+}
+
+/* v2: Emulator thread */
+static void* v2_emu_thread_func(void *arg) {
+    jv880_instance_t *inst = (jv880_instance_t*)arg;
+    fprintf(stderr, "JV880 v2: Emulation thread started\n");
+
+    BiquadFilter aa_filter;
+    biquad_init(&aa_filter);
+
+    const double step = (double)JV880_SAMPLE_RATE / (double)MOVE_SAMPLE_RATE;
+    double resample_pos = 0.0;
+    double prev_l = 0.0, prev_r = 0.0;
+    double curr_l = 0.0, curr_r = 0.0;
+
+    while (inst->thread_running) {
+        /* Process MIDI queue */
+        while (inst->midi_read != inst->midi_write) {
+            int idx = inst->midi_read;
+            inst->mcu->postMidiSC55(inst->midi_queue[idx], inst->midi_queue_len[idx]);
+            inst->midi_read = (inst->midi_read + 1) % MIDI_QUEUE_SIZE;
+        }
+
+        /* Check for pending parameter mapping SysEx */
+        if (inst->map_sysex_len > 0) {
+            inst->mcu->postMidiSC55(inst->map_sysex_pending, inst->map_sysex_len);
+            inst->map_sysex_len = 0;
+        }
+
+        /* Check if we need more audio */
+        int free_space = v2_ring_free(inst);
+        if (free_space < 64) {
+            usleep(50);
+            continue;
+        }
+
+        inst->mcu->updateSC55(64);
+        int avail = inst->mcu->sample_write_ptr;
+
+        /* Process all input samples through anti-aliasing filter */
+        for (int i = 0; i < avail; i += 2) {
+            double in_l = (double)inst->mcu->sample_buffer[i];
+            double in_r = (double)inst->mcu->sample_buffer[i + 1];
+            double filt_l, filt_r;
+            biquad_process(&aa_filter, in_l, in_r, &filt_l, &filt_r);
+
+            prev_l = curr_l;
+            prev_r = curr_r;
+            curr_l = filt_l;
+            curr_r = filt_r;
+            resample_pos += 1.0;
+
+            while (resample_pos >= step && v2_ring_free(inst) > 0) {
+                resample_pos -= step;
+
+                double t = 1.0 - (resample_pos / 1.0);
+                if (t < 0.0) t = 0.0;
+                if (t > 1.0) t = 1.0;
+
+                int32_t out_l = (int32_t)(prev_l + t * (curr_l - prev_l));
+                int32_t out_r = (int32_t)(prev_r + t * (curr_r - prev_r));
+
+                pthread_mutex_lock(&inst->ring_mutex);
+                int wr = inst->ring_write;
+                inst->audio_ring[wr * 2 + 0] = out_l;
+                inst->audio_ring[wr * 2 + 1] = out_r;
+                inst->ring_write = (wr + 1) % AUDIO_RING_SIZE;
+                pthread_mutex_unlock(&inst->ring_mutex);
+            }
+        }
+    }
+
+    fprintf(stderr, "JV880 v2: Emulation thread stopped\n");
+    return NULL;
+}
+
+/* v2: MIDI handler */
+static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst || !inst->initialized) return;
+    (void)source;
+
+    /* Copy to MIDI queue with octave transpose */
+    int write_idx = inst->midi_write;
+    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+    if (next == inst->midi_read) return; /* Queue full */
+
+    memcpy(inst->midi_queue[write_idx], msg, len);
+    inst->midi_queue_len[write_idx] = len;
+
+    /* Apply octave transpose to note on/off */
+    uint8_t status = inst->midi_queue[write_idx][0] & 0xF0;
+    if ((status == 0x90 || status == 0x80) && len >= 2) {
+        int note = inst->midi_queue[write_idx][1] + (inst->octave_transpose * 12);
+        if (note < 0) note = 0;
+        if (note > 127) note = 127;
+        inst->midi_queue[write_idx][1] = note;
+    }
+
+    inst->midi_write = next;
+}
+
+/* v2: Set parameter - full expansion support */
+static void v2_set_param(void *instance, const char *key, const char *val) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst) return;
+
+    if (strcmp(key, "preset") == 0) {
+        int idx = atoi(val);
+        if (idx >= 0 && idx < inst->total_patches) {
+            v2_select_patch(inst, idx);
+        }
+    } else if (strcmp(key, "octave_transpose") == 0) {
+        int v = atoi(val);
+        if (v < -3) v = -3;
+        if (v > 3) v = 3;
+        inst->octave_transpose = v;
+    } else if (strcmp(key, "program_change") == 0) {
+        int program = atoi(val);
+        if (program >= 0 && program < inst->total_patches) {
+            v2_select_patch(inst, program);
+        }
+    }
+}
+
+/* v2: Get parameter */
+static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst) return -1;
+
+    if (strcmp(key, "preset_name") == 0 || strcmp(key, "patch_name") == 0 || strcmp(key, "name") == 0) {
+        if (!inst->loading_complete) {
+            return snprintf(buf, buf_len, "%s", inst->loading_status);
+        }
+        if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
+            return snprintf(buf, buf_len, "%s", inst->patches[inst->current_patch].name);
+        }
+        return snprintf(buf, buf_len, "JV-880");
+    }
+    if (strcmp(key, "preset_count") == 0 || strcmp(key, "total_patches") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->total_patches);
+    }
+    if (strcmp(key, "current_patch") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->current_patch);
+    }
+    if (strcmp(key, "octave_transpose") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->octave_transpose);
+    }
+    if (strcmp(key, "loading_complete") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->loading_complete);
+    }
+    if (strcmp(key, "polyphony") == 0) {
+        return snprintf(buf, buf_len, "28");
+    }
+
+    return -1;
+}
+
+/* v2: Render block */
+static void v2_render_block(void *instance, int16_t *out, int frames) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst || !inst->initialized || !inst->thread_running) {
+        memset(out, 0, frames * 2 * sizeof(int16_t));
+        return;
+    }
+
+    pthread_mutex_lock(&inst->ring_mutex);
+    int avail = v2_ring_available(inst);
+    int to_read = (avail < frames) ? avail : frames;
+
+    for (int i = 0; i < to_read; i++) {
+        out[i * 2 + 0] = inst->audio_ring[inst->ring_read * 2 + 0] >> OUTPUT_GAIN_SHIFT;
+        out[i * 2 + 1] = inst->audio_ring[inst->ring_read * 2 + 1] >> OUTPUT_GAIN_SHIFT;
+        inst->ring_read = (inst->ring_read + 1) % AUDIO_RING_SIZE;
+    }
+    pthread_mutex_unlock(&inst->ring_mutex);
+
+    /* Pad with silence if underrun */
+    for (int i = to_read; i < frames; i++) {
+        out[i * 2 + 0] = 0;
+        out[i * 2 + 1] = 0;
+    }
+
+    /* Note: SRAM scanning and mapping would need full refactoring */
+}
+
+/* v2 API struct */
+static plugin_api_v2_t jv880_api_v2 = {
+    MOVE_PLUGIN_API_VERSION_2,
+    v2_create_instance,
+    v2_destroy_instance,
+    v2_on_midi,
+    v2_set_param,
+    v2_get_param,
+    v2_render_block
+};
+
+/* v2 Entry Point */
+extern "C" plugin_api_v2_t* move_plugin_init_v2(const host_api_v1_t *host) {
+    (void)host;
+    fprintf(stderr, "JV880: v2 API initialized\n");
+    return &jv880_api_v2;
+}
