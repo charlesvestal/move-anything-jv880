@@ -678,6 +678,12 @@ function handleCC(cc, value) {
         return true;
     }
 
+    /* Back button - return to host menu (or exit component UI in Signal Chain) */
+    if (cc === CC_BACK && value > 0) {
+        host_return_to_menu();
+        return true;
+    }
+
     return false;
 }
 

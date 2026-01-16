@@ -3670,6 +3670,50 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
     inst->midi_write = next;
 }
 
+/* v2: Helper to find which bank a patch belongs to */
+static int v2_get_bank_for_patch(jv880_instance_t *inst, int patch_index) {
+    for (int i = inst->bank_count - 1; i >= 0; i--) {
+        if (patch_index >= inst->bank_starts[i]) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* v2: Jump to next/previous bank */
+static void v2_jump_to_bank(jv880_instance_t *inst, int direction) {
+    int current_bank = v2_get_bank_for_patch(inst, inst->current_patch);
+    int new_bank = current_bank + direction;
+
+    /* Wrap around */
+    if (new_bank < 0) new_bank = inst->bank_count - 1;
+    if (new_bank >= inst->bank_count) new_bank = 0;
+
+    v2_select_patch(inst, inst->bank_starts[new_bank]);
+    fprintf(stderr, "JV880 v2: Jumped to bank %d: %s\n", new_bank, inst->bank_names[new_bank]);
+}
+
+/* v2: Switch between patch and performance mode */
+static void v2_set_mode(jv880_instance_t *inst, int performance_mode) {
+    if (!inst || !inst->mcu) return;
+
+    int new_mode = performance_mode ? 1 : 0;
+
+    /* Only switch if mode is actually changing */
+    if (inst->performance_mode == new_mode) return;
+
+    inst->performance_mode = new_mode;
+
+    /* Set mode in NVRAM: 0 = performance, 1 = patch */
+    inst->mcu->nvram[NVRAM_MODE_OFFSET] = inst->performance_mode ? 0 : 1;
+
+    /* Simulate pressing PATCH/PERFORM button to trigger mode switch in emulator */
+    inst->mcu->mcu_button_pressed |= (1 << MCU_BUTTON_PATCH_PERFORM);
+
+    fprintf(stderr, "JV880 v2: Switched to %s mode\n",
+            inst->performance_mode ? "Performance" : "Patch");
+}
+
 /* v2: Set parameter - full expansion support */
 static void v2_set_param(void *instance, const char *key, const char *val) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
@@ -3690,6 +3734,32 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (program >= 0 && program < inst->total_patches) {
             v2_select_patch(inst, program);
         }
+    } else if (strcmp(key, "next_bank") == 0) {
+        v2_jump_to_bank(inst, 1);
+    } else if (strcmp(key, "prev_bank") == 0) {
+        v2_jump_to_bank(inst, -1);
+    } else if (strcmp(key, "mode") == 0) {
+        /* Switch between patch (0) and performance (1) mode */
+        int mode = atoi(val);
+        v2_set_mode(inst, mode);
+    } else if (strcmp(key, "load_expansion") == 0) {
+        /* Load a specific expansion card by index */
+        int exp_idx = atoi(val);
+        int bank_offset = 0;
+        const char *comma = strchr(val, ',');
+        if (comma) {
+            bank_offset = atoi(comma + 1);
+        }
+        if (exp_idx >= 0 && exp_idx < inst->expansion_count) {
+            int max_offset = (inst->expansions[exp_idx].patch_count > 64) ?
+                             ((inst->expansions[exp_idx].patch_count - 1) / 64) * 64 : 0;
+            if (bank_offset < 0) bank_offset = 0;
+            if (bank_offset > max_offset) bank_offset = max_offset;
+            inst->expansion_bank_offset = bank_offset;
+            inst->current_expansion = exp_idx;
+            fprintf(stderr, "JV880 v2: Loaded expansion %d (%s) at bank offset %d\n",
+                    exp_idx, inst->expansions[exp_idx].name, bank_offset);
+        }
     }
 }
 
@@ -3701,6 +3771,16 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "preset_name") == 0 || strcmp(key, "patch_name") == 0 || strcmp(key, "name") == 0) {
         if (!inst->loading_complete) {
             return snprintf(buf, buf_len, "%s", inst->loading_status);
+        }
+        if (inst->performance_mode) {
+            /* In performance mode, return performance name */
+            static const char* perf_bank_names[] = {"PA", "PB", "INT"};
+            int bank = inst->current_performance / PERFS_PER_BANK;
+            int num = (inst->current_performance % PERFS_PER_BANK) + 1;
+            if (bank >= 0 && bank < NUM_PERF_BANKS) {
+                return snprintf(buf, buf_len, "%s:%02d", perf_bank_names[bank], num);
+            }
+            return snprintf(buf, buf_len, "---");
         }
         if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
             return snprintf(buf, buf_len, "%s", inst->patches[inst->current_patch].name);
@@ -3719,8 +3799,94 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "loading_complete") == 0) {
         return snprintf(buf, buf_len, "%d", inst->loading_complete);
     }
+    if (strcmp(key, "loading_status") == 0) {
+        return snprintf(buf, buf_len, "%s", inst->loading_status);
+    }
     if (strcmp(key, "polyphony") == 0) {
         return snprintf(buf, buf_len, "28");
+    }
+    /* Bank information */
+    if (strcmp(key, "bank_count") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->bank_count);
+    }
+    if (strcmp(key, "bank_name") == 0) {
+        if (inst->performance_mode) {
+            /* Performance mode - return performance bank name */
+            static const char* perf_bank_names[] = {"Preset A", "Preset B", "Internal"};
+            int bank = inst->current_performance / PERFS_PER_BANK;
+            if (bank >= 0 && bank < NUM_PERF_BANKS) {
+                return snprintf(buf, buf_len, "%s", perf_bank_names[bank]);
+            }
+            return snprintf(buf, buf_len, "JV-880");
+        }
+        /* Patch mode - return patch bank name */
+        if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
+            int bank = v2_get_bank_for_patch(inst, inst->current_patch);
+            if (bank >= 0 && bank < inst->bank_count) {
+                return snprintf(buf, buf_len, "%s", inst->bank_names[bank]);
+            }
+        }
+        return snprintf(buf, buf_len, "JV-880");
+    }
+    if (strcmp(key, "patch_in_bank") == 0) {
+        if (inst->performance_mode) {
+            /* Return 1-indexed position within performance bank */
+            int pos = (inst->current_performance % PERFS_PER_BANK) + 1;
+            return snprintf(buf, buf_len, "%d", pos);
+        } else {
+            /* Return 1-indexed position within current patch bank */
+            int bank = v2_get_bank_for_patch(inst, inst->current_patch);
+            int pos = inst->current_patch - inst->bank_starts[bank] + 1;
+            return snprintf(buf, buf_len, "%d", pos);
+        }
+    }
+    /* Mode information */
+    if (strcmp(key, "mode") == 0 || strcmp(key, "performance_mode") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->performance_mode);
+    }
+    if (strcmp(key, "current_performance") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->current_performance);
+    }
+    if (strcmp(key, "current_part") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->current_part);
+    }
+    if (strcmp(key, "num_performances") == 0) {
+        return snprintf(buf, buf_len, "%d", NUM_PERFORMANCES);
+    }
+    if (strcmp(key, "num_parts") == 0) {
+        return snprintf(buf, buf_len, "8");
+    }
+    /* Expansion information */
+    if (strcmp(key, "expansion_count") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->expansion_count);
+    }
+    if (strcmp(key, "current_expansion") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->current_expansion);
+    }
+    if (strcmp(key, "expansion_bank_offset") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->expansion_bank_offset);
+    }
+    /* Bank queries: bank_<idx>_name, bank_<idx>_start, bank_<idx>_count */
+    if (strncmp(key, "bank_", 5) == 0) {
+        int idx = atoi(key + 5);
+        if (strstr(key, "_name") && idx >= 0 && idx < inst->bank_count) {
+            return snprintf(buf, buf_len, "%s", inst->bank_names[idx]);
+        }
+        if (strstr(key, "_start") && idx >= 0 && idx < inst->bank_count) {
+            return snprintf(buf, buf_len, "%d", inst->bank_starts[idx]);
+        }
+        if (strstr(key, "_count") && idx >= 0 && idx < inst->bank_count) {
+            int next_start = (idx + 1 < inst->bank_count) ? inst->bank_starts[idx + 1] : inst->total_patches;
+            return snprintf(buf, buf_len, "%d", next_start - inst->bank_starts[idx]);
+        }
+    }
+    /* Patch name queries: patch_<idx>_name */
+    if (strncmp(key, "patch_", 6) == 0 && strstr(key, "_name")) {
+        int idx = atoi(key + 6);
+        if (idx >= 0 && idx < inst->total_patches) {
+            return snprintf(buf, buf_len, "%s", inst->patches[idx].name);
+        }
+        return snprintf(buf, buf_len, "---");
     }
 
     return -1;
