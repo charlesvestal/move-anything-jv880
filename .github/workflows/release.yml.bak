@@ -33,23 +33,12 @@ jobs:
       - name: Update release.json
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          INSTALL_PATH=$(jq -r '.install_path // empty' release.json 2>/dev/null || echo "")
-          if [ -n "$INSTALL_PATH" ]; then
-            cat > release.json << EOFJ
-          {
-            "version": "${VERSION}",
-            "download_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jv880-module.tar.gz",
-            "install_path": "${INSTALL_PATH}"
-          }
-          EOFJ
-          else
-            cat > release.json << EOFJ
+          cat > release.json << EOF
           {
             "version": "${VERSION}",
             "download_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jv880-module.tar.gz"
           }
-          EOFJ
-          fi
+          EOF
 
       - name: Commit release.json
         run: |
