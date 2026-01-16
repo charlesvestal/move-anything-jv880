@@ -1,4 +1,5 @@
 {
   "version": "0.3.1",
-  "download_url": "https://github.com/charlesvestal/move-anything-jv880/releases/download/v0.3.1/jv880-module.tar.gz"
+  "download_url": "https://github.com/charlesvestal/move-anything-jv880/releases/download/v0.3.1/jv880-module.tar.gz",
+  "install_path": "chain/sound_generators"
 }
