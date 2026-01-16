@@ -2721,23 +2721,10 @@ static void jv880_render_block(int16_t *out, int frames) {
     }
 }
 
-static plugin_api_v1_t jv880_api = {
-    1,
-    jv880_on_load,
-    jv880_on_unload,
-    jv880_on_midi,
-    jv880_set_param,
-    jv880_get_param,
-    jv880_render_block
-};
-
-extern "C" plugin_api_v1_t* move_plugin_init_v1(const host_api_v1_t *host) {
-    (void)host;
-    return &jv880_api;
-}
-
 /* ========================================================================
  * PLUGIN API V2 - INSTANCE-BASED (for multi-instance support)
+ *
+ * Note: V1 API has been removed. V2 is required.
  *
  * Note: JV880 is extremely resource-intensive (emulator, ROMs, threads).
  * Multiple simultaneous instances are technically possible but may cause
