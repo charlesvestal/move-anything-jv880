@@ -3701,6 +3701,77 @@ static void v2_set_mode(jv880_instance_t *inst, int performance_mode) {
             inst->performance_mode ? "Performance" : "Patch");
 }
 
+/* v2: Select a performance (0-47 across 3 banks) */
+static void v2_select_performance(jv880_instance_t *inst, int perf_index) {
+    if (!inst || !inst->mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
+
+    inst->current_performance = perf_index;
+    inst->perf_bank = perf_index / PERFS_PER_BANK;
+    int perf_in_bank = perf_index % PERFS_PER_BANK;
+
+    /* Ensure we're in performance mode */
+    if (!inst->performance_mode) {
+        v2_set_mode(inst, 1);
+    }
+
+    /* Calculate bank select and program change values per JV-880 MIDI spec */
+    uint8_t bank_msb;
+    uint8_t pc_value;
+
+    switch (inst->perf_bank) {
+        case 0:  /* Preset A */
+            bank_msb = 81;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+        case 1:  /* Preset B */
+            bank_msb = 81;
+            pc_value = 64 + perf_in_bank;  /* 64-79 */
+            break;
+        case 2:  /* Internal */
+        default:
+            bank_msb = 80;
+            pc_value = perf_in_bank;  /* 0-15 */
+            break;
+    }
+
+    /* Send on Control Channel (channel 16 = 0x0F) */
+    uint8_t ctrl_ch = 0x0F;
+    uint8_t bank_msg[3] = { (uint8_t)(0xB0 | ctrl_ch), 0x00, bank_msb };
+    uint8_t pc_msg[2] = { (uint8_t)(0xC0 | ctrl_ch), pc_value };
+
+    /* Queue Bank Select (CC#0) */
+    pthread_mutex_lock(&inst->ring_mutex);
+    int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != inst->midi_read) {
+        memcpy(inst->midi_queue[inst->midi_write], bank_msg, 3);
+        inst->midi_queue_len[inst->midi_write] = 3;
+        inst->midi_write = next;
+    }
+
+    /* Queue Program Change */
+    next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+    if (next != inst->midi_read) {
+        memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
+        inst->midi_queue_len[inst->midi_write] = 2;
+        inst->midi_write = next;
+    }
+    pthread_mutex_unlock(&inst->ring_mutex);
+
+    const char* bank_names[] = { "Preset A", "Preset B", "Internal" };
+    fprintf(stderr, "JV880 v2: Selected %s performance %d\n",
+            bank_names[inst->perf_bank], perf_in_bank + 1);
+
+    /* Schedule SRAM scan for performance data discovery */
+    inst->sram_scan_countdown = 100;
+}
+
+/* v2: Select a part within the current performance (0-7) */
+static void v2_select_part(jv880_instance_t *inst, int part_index) {
+    if (!inst || part_index < 0 || part_index > 7) return;
+    inst->current_part = part_index;
+    fprintf(stderr, "JV880 v2: Selected part %d\n", part_index + 1);
+}
+
 /* v2: Set parameter - full expansion support */
 static void v2_set_param(void *instance, const char *key, const char *val) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
@@ -3729,6 +3800,18 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         /* Switch between patch (0) and performance (1) mode */
         int mode = atoi(val);
         v2_set_mode(inst, mode);
+    } else if (strcmp(key, "performance") == 0) {
+        /* Select performance 0-47 */
+        int perf = atoi(val);
+        if (perf < 0) perf = 0;
+        if (perf >= NUM_PERFORMANCES) perf = NUM_PERFORMANCES - 1;
+        v2_select_performance(inst, perf);
+    } else if (strcmp(key, "part") == 0) {
+        /* Select part 0-7 within performance */
+        int part = atoi(val);
+        if (part < 0) part = 0;
+        if (part > 7) part = 7;
+        v2_select_part(inst, part);
     } else if (strcmp(key, "load_expansion") == 0) {
         /* Load a specific expansion card by index */
         int exp_idx = atoi(val);
@@ -3831,10 +3914,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "mode") == 0 || strcmp(key, "performance_mode") == 0) {
         return snprintf(buf, buf_len, "%d", inst->performance_mode);
     }
-    if (strcmp(key, "current_performance") == 0) {
+    if (strcmp(key, "current_performance") == 0 || strcmp(key, "performance") == 0) {
         return snprintf(buf, buf_len, "%d", inst->current_performance);
     }
-    if (strcmp(key, "current_part") == 0) {
+    if (strcmp(key, "current_part") == 0 || strcmp(key, "part") == 0) {
         return snprintf(buf, buf_len, "%d", inst->current_part);
     }
     if (strcmp(key, "num_performances") == 0) {
