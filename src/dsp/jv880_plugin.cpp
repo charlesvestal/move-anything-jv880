@@ -3876,6 +3876,95 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "---");
     }
 
+    /* UI hierarchy for shadow parameter editor
+     * JV-880 has two modes: patch and performance
+     * - Patch mode: browse patches → tones (1-4) → tone params
+     * - Performance mode: browse performances → parts (1-8) → part params
+     *
+     * Tone params use: nvram_tone_<n>_<param> (n=0-3)
+     * Patch common params use: nvram_patchCommon_<param>
+     * Part params use: sram_part_<n>_<param> (n=0-7)
+     */
+    if (strcmp(key, "ui_hierarchy") == 0) {
+        const char *hierarchy = "{"
+            "\"modes\":[\"patch\",\"performance\"],"
+            "\"levels\":{"
+                "\"patch\":{"
+                    "\"list_param\":\"preset\","
+                    "\"count_param\":\"preset_count\","
+                    "\"name_param\":\"preset_name\","
+                    "\"children\":\"tones\","
+                    "\"child_count\":4,"
+                    "\"child_label\":\"Tone\","
+                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"params\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_reverbtime\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_chorusdepth\",\"nvram_patchCommon_chorusrate\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"]"
+                "},"
+                "\"tones\":{"
+                    "\"children\":null,"
+                    "\"child_prefix\":\"nvram_tone_\","
+                    "\"knobs\":[\"cutofffrequency\",\"resonance\",\"level\",\"pan\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"reverbsendlevel\"],"
+                    "\"params\":[\"cutofffrequency\",\"resonance\",\"level\",\"pan\",\"pitchcoarse\",\"pitchfine\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"tvaenvtime4\",\"drylevel\",\"reverbsendlevel\",\"chorussendlevel\"]"
+                "},"
+                "\"performance\":{"
+                    "\"list_param\":\"performance\","
+                    "\"count_param\":\"num_performances\","
+                    "\"name_param\":\"preset_name\","
+                    "\"children\":\"parts\","
+                    "\"child_count\":8,"
+                    "\"child_label\":\"Part\","
+                    "\"knobs\":[\"octave_transpose\"],"
+                    "\"params\":[\"octave_transpose\"]"
+                "},"
+                "\"parts\":{"
+                    "\"children\":null,"
+                    "\"child_prefix\":\"sram_part_\","
+                    "\"knobs\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\"],"
+                    "\"params\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"patchnumber\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
+                "}"
+            "}"
+        "}";
+        int len = strlen(hierarchy);
+        if (len < buf_len) {
+            strcpy(buf, hierarchy);
+            return len;
+        }
+        return -1;
+    }
+
+    /* Chain params metadata for shadow parameter editor */
+    if (strcmp(key, "chain_params") == 0) {
+        const char *params_json = "["
+            "{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":9999},"
+            "{\"key\":\"performance\",\"name\":\"Performance\",\"type\":\"int\",\"min\":0,\"max\":47},"
+            "{\"key\":\"part\",\"name\":\"Part\",\"type\":\"int\",\"min\":0,\"max\":7},"
+            "{\"key\":\"octave_transpose\",\"name\":\"Octave\",\"type\":\"int\",\"min\":-3,\"max\":3},"
+            "{\"key\":\"nvram_patchCommon_patchlevel\",\"name\":\"Patch Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_patchpan\",\"name\":\"Patch Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Reverb Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_reverbtime\",\"name\":\"Reverb Time\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_choruslevel\",\"name\":\"Chorus Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_chorusdepth\",\"name\":\"Chorus Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_chorusrate\",\"name\":\"Chorus Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_analogfeel\",\"name\":\"Analog Feel\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"cutofffrequency\",\"name\":\"Cutoff\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"level\",\"name\":\"Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"pan\",\"name\":\"Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"partlevel\",\"name\":\"Part Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"partpan\",\"name\":\"Part Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"reverbswitch\",\"name\":\"Reverb Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
+            "{\"key\":\"chorusswitch\",\"name\":\"Chorus Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
+            "{\"key\":\"partcoarsetune\",\"name\":\"Coarse Tune\",\"type\":\"int\",\"min\":16,\"max\":112},"
+            "{\"key\":\"partfinetune\",\"name\":\"Fine Tune\",\"type\":\"int\",\"min\":14,\"max\":114}"
+        "]";
+        int len = strlen(params_json);
+        if (len < buf_len) {
+            strcpy(buf, params_json);
+            return len;
+        }
+        return -1;
+    }
+
     return -1;
 }
 
