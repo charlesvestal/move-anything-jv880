@@ -2837,6 +2837,7 @@ static void v2_build_patch_list(jv880_instance_t *inst);
 static int v2_load_expansion_data(jv880_instance_t *inst, int exp_index);
 static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index);
 static void v2_select_patch(jv880_instance_t *inst, int global_index);
+static void v2_select_performance(jv880_instance_t *inst, int perf_index);
 static void v2_send_all_notes_off(jv880_instance_t *inst);
 
 /* v2: Get file size helper */
@@ -3699,6 +3700,17 @@ static void v2_set_mode(jv880_instance_t *inst, int performance_mode) {
 
     fprintf(stderr, "JV880 v2: Switched to %s mode\n",
             inst->performance_mode ? "Performance" : "Patch");
+
+    /* When switching to patch mode, re-select the current patch to actually load it.
+     * When switching to performance mode, re-select current performance to load it.
+     * This ensures the emulator's sound matches what the UI displays. */
+    if (!inst->performance_mode) {
+        /* Entering patch mode - load the current patch */
+        v2_select_patch(inst, inst->current_patch);
+    } else {
+        /* Entering performance mode - load the current performance */
+        v2_select_performance(inst, inst->current_performance);
+    }
 }
 
 /* v2: Select a performance (0-47 across 3 banks) */
