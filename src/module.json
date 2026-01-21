@@ -1,6 +1,7 @@
 {
   "id": "jv880",
   "name": "JV-880",
+  "abbrev": "JV",
   "version": "0.3.1",
   "description": "Roland JV-880 emulator (mini-jv880)",
   "author": "nukeykt/giulioz",
