@@ -3998,6 +3998,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "ui_hierarchy") == 0) {
         const char *hierarchy = "{"
             "\"modes\":[\"patch\",\"performance\"],"
+            "\"mode_param\":\"mode\","
             "\"levels\":{"
                 "\"patch\":{"
                     "\"list_param\":\"preset\","
