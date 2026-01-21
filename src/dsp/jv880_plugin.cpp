@@ -3843,12 +3843,39 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             return snprintf(buf, buf_len, "%s", inst->loading_status);
         }
         if (inst->performance_mode) {
-            /* In performance mode, return performance name */
-            static const char* perf_bank_names[] = {"PA", "PB", "INT"};
-            int bank = inst->current_performance / PERFS_PER_BANK;
-            int num = (inst->current_performance % PERFS_PER_BANK) + 1;
-            if (bank >= 0 && bank < NUM_PERF_BANKS) {
-                return snprintf(buf, buf_len, "%s:%02d", perf_bank_names[bank], num);
+            /* In performance mode, read name from ROM2/NVRAM */
+            int idx = inst->current_performance;
+            if (idx >= 0 && idx < NUM_PERFORMANCES) {
+                int bank = idx / PERFS_PER_BANK;
+                int perf_in_bank = idx % PERFS_PER_BANK;
+                uint8_t name_buf[PERF_NAME_LEN + 1];
+                memset(name_buf, 0, sizeof(name_buf));
+                int got_name = 0;
+
+                if (bank == 2 && inst->mcu) {
+                    /* Internal - read from NVRAM */
+                    uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (perf_in_bank * PERF_SIZE);
+                    if (nvram_offset + PERF_NAME_LEN <= 0x8000) {
+                        memcpy(name_buf, &inst->mcu->nvram[nvram_offset], PERF_NAME_LEN);
+                        got_name = 1;
+                    }
+                } else if (inst->rom2) {
+                    /* Preset A/B - read from ROM2 */
+                    uint32_t offset = (bank == 0) ? PERF_OFFSET_PRESET_A : PERF_OFFSET_PRESET_B;
+                    offset += perf_in_bank * PERF_SIZE;
+                    if (offset + PERF_NAME_LEN <= 0x40000) {
+                        memcpy(name_buf, &inst->rom2[offset], PERF_NAME_LEN);
+                        got_name = 1;
+                    }
+                }
+
+                if (got_name) {
+                    /* Trim trailing spaces */
+                    int len = PERF_NAME_LEN;
+                    while (len > 0 && (name_buf[len - 1] == ' ' || name_buf[len - 1] == 0)) len--;
+                    name_buf[len] = '\0';
+                    return snprintf(buf, buf_len, "%s", name_buf);
+                }
             }
             return snprintf(buf, buf_len, "---");
         }
