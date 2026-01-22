@@ -8,6 +8,7 @@
 
 import * as std from 'std';
 
+/* Shared utilities - absolute path for module location independence */
 import {
     BrightGreen, BrightRed, DarkGrey, LightGrey, White, ForestGreen,
     MoveMainKnob, MoveMainButton,
@@ -17,14 +18,14 @@ import {
     MoveKnob5, MoveKnob6, MoveKnob7, MoveKnob8,
     MoveRow1, MoveRow2, MoveRow3, MoveRow4,
     MoveSteps, MovePads
-} from '../../shared/constants.mjs';
+} from '/data/UserData/move-anything/shared/constants.mjs';
 
-import { isCapacitiveTouchMessage, setLED, setButtonLED, decodeDelta, decodeAcceleratedDelta } from '../../shared/input_filter.mjs';
+import { isCapacitiveTouchMessage, setLED, setButtonLED, decodeDelta, decodeAcceleratedDelta } from '/data/UserData/move-anything/shared/input_filter.mjs';
 
-import { createMenuStack } from '../../shared/menu_stack.mjs';
-import { createMenuState, handleMenuInput } from '../../shared/menu_nav.mjs';
-import { drawHierarchicalMenu } from '../../shared/menu_render.mjs';
-import { showOverlay, hideOverlay, tickOverlay, drawOverlay, isOverlayActive } from '../../shared/menu_layout.mjs';
+import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
+import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
+import { drawHierarchicalMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
+import { showOverlay, hideOverlay, tickOverlay, drawOverlay, isOverlayActive } from '/data/UserData/move-anything/shared/menu_layout.mjs';
 
 import { getMainMenu, getPatchBanksMenu, getPerformancesMenu, getEditMenu, setStateAccessor as setMenuStateAccessor } from './ui_menu.mjs';
 import {
