@@ -27,22 +27,23 @@ if [ ! -f "dist/jv880/roms/jv880_rom1.bin" ]; then
     echo ""
 fi
 
-# Deploy to Move
+# Deploy to Move - sound_generators subdirectory
 echo "Copying module to Move..."
-scp -r dist/jv880 ableton@move.local:/data/UserData/move-anything/modules/
+ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/sound_generators/jv880"
+scp -r dist/jv880/* ableton@move.local:/data/UserData/move-anything/modules/sound_generators/jv880/
 
 # Install chain presets if they exist
 if [ -d "src/chain_patches" ]; then
     echo "Installing chain presets..."
-    scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/modules/chain/patches/
+    scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/patches/
 fi
 
 # Set permissions so Module Store can update later
 echo "Setting permissions..."
-ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/jv880"
+ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/sound_generators/jv880"
 
 echo ""
 echo "=== Install Complete ==="
-echo "Module installed to: /data/UserData/move-anything/modules/jv880/"
+echo "Module installed to: /data/UserData/move-anything/modules/sound_generators/jv880/"
 echo ""
 echo "Restart Move Anything to load the new module."
