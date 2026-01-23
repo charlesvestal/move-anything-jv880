@@ -3369,11 +3369,13 @@ static void* v2_load_thread_func(void *arg) {
     }
     fprintf(stderr, "JV880 v2: Buffer pre-filled: %d samples\n", inst->ring_write);
 
-    /* Start emulation thread */
+    /* Start emulation thread - set initialized BEFORE pthread_create so
+     * render_block and on_midi can start working with the pre-filled buffer
+     * while the emu_thread starts up */
     inst->thread_running = 1;
+    inst->initialized = 1;
     pthread_create(&inst->emu_thread, NULL, v2_emu_thread_func, inst);
 
-    inst->initialized = 1;
     inst->loading_complete = 1;
     snprintf(inst->loading_status, sizeof(inst->loading_status),
              "Ready: %d patches in %d banks", inst->total_patches, inst->bank_count);
