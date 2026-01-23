@@ -30,33 +30,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update release.json
+      - name: Commit release.json
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # Save install_path before switching branches
           INSTALL_PATH=$(jq -r '.install_path // empty' release.json 2>/dev/null || echo "")
+
+          git fetch origin main
+          git checkout -f main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Recreate release.json on main
           if [ -n "$INSTALL_PATH" ]; then
-            cat > release.json << EOFJ
+            cat > release.json << EOF
           {
             "version": "${VERSION}",
             "download_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jv880-module.tar.gz",
             "install_path": "${INSTALL_PATH}"
           }
-          EOFJ
+          EOF
           else
-            cat > release.json << EOFJ
+            cat > release.json << EOF
           {
             "version": "${VERSION}",
             "download_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jv880-module.tar.gz"
           }
-          EOFJ
+          EOF
           fi
 
-      - name: Commit release.json
-        run: |
-          git fetch origin main
-          git checkout main
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add release.json
-          git commit -m "chore: update release.json for ${{ github.ref_name }}"
+          git commit -m "chore: update release.json for ${{ github.ref_name }}" || echo "No changes to commit"
           git push origin main
