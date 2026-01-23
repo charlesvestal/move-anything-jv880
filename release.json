@@ -1,9 +1,4 @@
 {
-  "version": "0.3.3",
-  "download_url": "https://github.com/charlesvestal/move-anything-jv880/releases/download/v0.3.3/jv880-module.tar.gz",
-  "name": "JV-880",
-  "description": "Roland JV-880 Multi-Timbral Synthesizer emulation. Supports internal patches, performances, and SR-JV80 expansion boards for access to thousands of classic Roland sounds.",
-  "requires": "JV-880 ROM files",
-  "post_install": "Requires ROM files: jv880_rom1.bin, jv880_rom2.bin, jv880_waverom1.bin, jv880_waverom2.bin in the roms/ directory.",
-  "repo_url": "https://github.com/charlesvestal/move-anything-jv880"
+  "version": "0.3.5",
+  "download_url": "https://github.com/charlesvestal/move-anything-jv880/releases/download/v0.3.5/jv880-module.tar.gz"
 }
