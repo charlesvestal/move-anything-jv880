@@ -5,6 +5,7 @@
   "version": "0.3.5",
   "description": "Roland JV-880 emulator (mini-jv880)",
   "author": "nukeykt/giulioz",
+  "license": "Non-commercial",
   "ui": "ui.js",
   "dsp": "dsp.so",
   "api_version": 2,
