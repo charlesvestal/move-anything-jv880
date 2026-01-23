@@ -2821,6 +2821,9 @@ typedef struct {
 
     /* Other settings */
     int octave_transpose;
+
+    /* Error state */
+    char load_error[256];
 } jv880_instance_t;
 
 /* Forward declarations for v2 helper functions */
@@ -4093,6 +4096,18 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     return -1;
 }
 
+/* v2: Get error - returns error message if module is in error state */
+static int v2_get_error(void *instance, char *buf, int buf_len) {
+    jv880_instance_t *inst = (jv880_instance_t*)instance;
+    if (!inst || !inst->load_error[0]) return 0;  /* No error */
+
+    int len = strlen(inst->load_error);
+    if (len >= buf_len) len = buf_len - 1;
+    memcpy(buf, inst->load_error, len);
+    buf[len] = '\0';
+    return len;
+}
+
 /* v2: Render block */
 static void v2_render_block(void *instance, int16_t *out, int frames) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
@@ -4129,6 +4144,7 @@ static plugin_api_v2_t jv880_api_v2 = {
     v2_on_midi,
     v2_set_param,
     v2_get_param,
+    v2_get_error,
     v2_render_block
 };
 
