@@ -2003,11 +2003,11 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
         snprintf(buf, buf_len, "%s", g_mcu->lcd.GetLine(1));
         return 1;
     }
-    if (strcmp(key, "total_patches") == 0) {
+    if (strcmp(key, "total_patches") == 0 || strcmp(key, "preset_count") == 0) {
         snprintf(buf, buf_len, "%d", g_total_patches);
         return 1;
     }
-    if (strcmp(key, "current_patch") == 0) {
+    if (strcmp(key, "current_patch") == 0 || strcmp(key, "preset") == 0) {
         snprintf(buf, buf_len, "%d", g_current_patch);
         return 1;
     }
@@ -3907,7 +3907,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "preset_count") == 0 || strcmp(key, "total_patches") == 0) {
         return snprintf(buf, buf_len, "%d", inst->total_patches);
     }
-    if (strcmp(key, "current_patch") == 0) {
+    if (strcmp(key, "current_patch") == 0 || strcmp(key, "preset") == 0) {
         return snprintf(buf, buf_len, "%d", inst->current_patch);
     }
     if (strcmp(key, "octave_transpose") == 0) {
