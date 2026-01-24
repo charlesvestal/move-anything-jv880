@@ -1,7 +1,7 @@
 /*
  * Debug script to find temp performance location in SRAM
  *
- * Run this from the Move Anything console after loading the JV-880 module.
+ * Run this from the Move Anything console after loading the Mini-JV module.
  * Paste into console or load via: load('path/to/debug_perf_finder.js')
  */
 

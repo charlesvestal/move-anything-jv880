@@ -215,11 +215,11 @@ Options to investigate:
 - [Edisyn JV-880 Editor Source](https://github.com/eclab/edisyn/tree/master/edisyn/synth/rolandjv880)
 - [jv880_juce Source](https://github.com/giulioz/jv880_juce)
 - [Roland JV-880 Owner's Manual](https://www.manualslib.com/manual/691699/Roland-Jv-880.html)
-- Roland JV-880 MIDI Implementation (pages 217-230 of manual)
+- JV-880 MIDI Implementation (pages 217-230 of manual)
 
 ## Notes
 
-The JV-880 emulator (mini-jv880) is based on Nuked-SC55 which emulates the hardware at a low level. The NVRAM is a 32KB SRAM that stores:
+The Mini-JV emulator (mini-jv880) is based on Nuked-SC55 which emulates the hardware at a low level. The NVRAM is a 32KB SRAM that stores:
 - System settings
 - User patches (Internal bank)
 - User performances
