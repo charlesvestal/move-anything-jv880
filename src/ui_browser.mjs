@@ -1,5 +1,5 @@
 /*
- * JV-880 Browser Mode Display
+ * Mini-JV Browser Mode Display
  *
  * Shows patch/performance info when not in menu mode.
  */
@@ -23,7 +23,7 @@ export function drawBrowser() {
     const state = getState();
     const mode = state.mode || 'patch';
     const patchName = state.patchName || '---';
-    const bankName = state.bankName || 'JV-880';
+    const bankName = state.bankName || 'Mini-JV';
     const bankScrollOffset = state.bankScrollOffset || 0;
     const patchInBank = state.patchInBank || 1;
     const selectedTone = state.selectedTone || 0;
@@ -88,7 +88,7 @@ export function drawBrowser() {
 /* === Loading Screen === */
 export function drawLoadingScreen(status) {
     clear_screen();
-    print(2, 2, 'JV-880', 1);
+    print(2, 2, 'Mini-JV', 1);
     fill_rect(0, 14, SCREEN_WIDTH, 1, 1);
     print(2, 24, 'Loading...', 1);
     print(2, 40, status || 'Initializing...', 1);

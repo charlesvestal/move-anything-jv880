@@ -1,5 +1,5 @@
 /*
- * JV-880 Module UI - Menu-Driven Version
+ * Mini-JV Module UI - Menu-Driven Version
  *
  * Two main modes:
  * - Browser: Shows current patch, jog to browse, knobs for macros
@@ -110,7 +110,7 @@ const menuState = createMenuState();
 let currentPreset = 0;
 let patchInBank = 1;  /* 1-indexed position within current bank */
 let totalPatches = 128;
-let bankName = 'JV-880';
+let bankName = 'Mini-JV';
 let bankCount = 0;
 let patchName = '---';
 let bankScrollOffset = 0;
