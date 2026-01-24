@@ -11,7 +11,7 @@ import {
     createToggle,
     createAction,
     createBack
-} from '../../shared/menu_items.mjs';
+} from '/data/UserData/move-anything/shared/menu_items.mjs';
 
 /* === State accessors (set by ui.js) === */
 let stateAccessor = null;
