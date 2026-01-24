@@ -3457,11 +3457,14 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
 
     if (!ok) {
         fprintf(stderr, "JV880 v2: ROM loading failed\n");
+        snprintf(inst->load_error, sizeof(inst->load_error),
+                 "JV-880: ROM files not found. Place ROM files in roms/ folder.");
         free(rom1); free(rom2); free(waverom1); free(waverom2); free(nvram);
         delete inst->mcu;
-        pthread_mutex_destroy(&inst->ring_mutex);
-        free(inst);
-        return NULL;
+        inst->mcu = nullptr;
+        inst->rom_loaded = 0;
+        inst->initialized = 1;  /* Mark as initialized so get_error works */
+        return inst;  /* Return instance so error can be retrieved */
     }
 
     /* Initialize emulator */
