@@ -1,9 +1,9 @@
 {
-  "id": "jv880",
-  "name": "JV-880",
+  "id": "minijv",
+  "name": "Mini-JV",
   "abbrev": "JV",
   "version": "0.3.8",
-  "description": "Roland JV-880 emulator (mini-jv880)",
+  "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz",
   "license": "Non-commercial",
   "ui": "ui.js",
