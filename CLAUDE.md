@@ -4,7 +4,7 @@ Instructions for Claude Code when working with this repository.
 
 ## Project Overview
 
-JV-880 module for Move Anything - a Roland JV-880 synthesizer emulator based on mini-jv880.
+Mini-JV module for Move Anything - a ROM-based synthesizer emulator based on mini-jv880.
 
 ## Architecture
 

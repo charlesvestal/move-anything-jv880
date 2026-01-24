@@ -1,5 +1,5 @@
 /*
- * JV-880 Plugin for Move Anything
+ * Mini-JV Plugin for Move Anything
  * Based on mini-jv880 emulator by giulioz (based on Nuked-SC55 by nukeykt)
  * Multi-expansion support with unified patch list
  */
@@ -1342,12 +1342,12 @@ static const char* get_current_bank_name(void) {
         if (bank >= 0 && bank < NUM_PERF_BANKS) {
             return perf_bank_names[bank];
         }
-        return "JV-880";
+        return "Mini-JV";
     }
 
     /* Patch mode */
     if (g_current_patch < 0 || g_current_patch >= g_total_patches) {
-        return "JV-880";
+        return "Mini-JV";
     }
 
     PatchInfo *p = &g_patches[g_current_patch];
@@ -3458,7 +3458,7 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
     if (!ok) {
         fprintf(stderr, "JV880 v2: ROM loading failed\n");
         snprintf(inst->load_error, sizeof(inst->load_error),
-                 "JV-880: ROM files not found. Place ROM files in roms/ folder.");
+                 "Mini-JV: ROM files not found. Place ROM files in roms/ folder.");
         free(rom1); free(rom2); free(waverom1); free(waverom2); free(nvram);
         delete inst->mcu;
         inst->mcu = nullptr;
@@ -3902,7 +3902,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
             return snprintf(buf, buf_len, "%s", inst->patches[inst->current_patch].name);
         }
-        return snprintf(buf, buf_len, "JV-880");
+        return snprintf(buf, buf_len, "Mini-JV");
     }
     if (strcmp(key, "preset_count") == 0 || strcmp(key, "total_patches") == 0) {
         return snprintf(buf, buf_len, "%d", inst->total_patches);
@@ -3934,7 +3934,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             if (bank >= 0 && bank < NUM_PERF_BANKS) {
                 return snprintf(buf, buf_len, "%s", perf_bank_names[bank]);
             }
-            return snprintf(buf, buf_len, "JV-880");
+            return snprintf(buf, buf_len, "Mini-JV");
         }
         /* Patch mode - return patch bank name */
         if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
@@ -3943,7 +3943,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 return snprintf(buf, buf_len, "%s", inst->bank_names[bank]);
             }
         }
-        return snprintf(buf, buf_len, "JV-880");
+        return snprintf(buf, buf_len, "Mini-JV");
     }
     if (strcmp(key, "patch_in_bank") == 0) {
         if (inst->performance_mode) {
