@@ -1,11 +1,11 @@
-# JV-880 on Move - User Manual
+# Mini-JV on Move - User Manual
 
-This module turns Move into a JV-880 synthesizer with menu-driven editing.
+This module turns Move into a Mini-JV synthesizer with menu-driven editing.
 
 ## Quick Start
 
 1. Launch Move Anything
-2. Select the **JV-880** module
+2. Select the **Mini-JV** module
 3. Play pads to trigger sounds
 4. Turn encoders to shape the sound (Cutoff, Resonance, Attack, etc.)
 5. Use Jog wheel to browse patches

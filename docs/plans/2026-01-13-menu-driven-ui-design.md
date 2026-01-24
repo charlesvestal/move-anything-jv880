@@ -1,4 +1,4 @@
-# JV-880 Menu-Driven UI Redesign
+# Mini-JV Menu-Driven UI Redesign
 
 ## Overview
 
@@ -42,7 +42,7 @@ Standard hierarchical menu. Jog scrolls, click enters/edits, BACK exits.
 ### Top Level
 
 ```
-JV-880
+Mini-JV
 > Browse Patches
   Browse Performances
   Settings
@@ -251,7 +251,7 @@ Steps 1-8: [BRIGHT] [dim] [grey] [dim] [off] [off] [off] [off]
 
 ## Shared Menu Components (move-anything repo)
 
-Before implementing the JV-880 UI, we'll build shared menu components in move-anything that can be reused across modules.
+Before implementing the Mini-JV UI, we'll build shared menu components in move-anything that can be reused across modules.
 
 ### MenuStack (`src/shared/menu_stack.mjs`)
 
@@ -352,7 +352,7 @@ Shows breadcrumb or title from stack, renders items with appropriate value displ
 3. Add click-to-edit behavior (replacing arrow-only editing)
 4. Test navigation and value editing
 
-### Phase 3: JV-880 UI (this repo)
+### Phase 3: Mini-JV UI (this repo)
 
 1. Import shared components
 2. Build menu structure (Browse, Edit, Settings)

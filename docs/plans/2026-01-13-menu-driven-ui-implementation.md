@@ -310,7 +310,7 @@ Integrate new settings rendering and input handling.
 
 ---
 
-## Phase 3: JV-880 UI (this repo)
+## Phase 3: Mini-JV UI (this repo)
 
 ### 3.1 Create menu structure (`src/ui_menu.mjs`)
 
@@ -409,7 +409,7 @@ function handleCC(cc, value) {
         if (uiMode === 'browser') {
             uiMode = 'menu';
             menuStack.reset();
-            menuStack.push({ title: 'JV-880', items: getMainMenu() });
+            menuStack.push({ title: 'Mini-JV', items: getMainMenu() });
         }
         return;
     }
