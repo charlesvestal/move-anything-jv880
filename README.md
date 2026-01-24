@@ -1,6 +1,6 @@
-# Move Anything - JV-880 Module
+# Move Anything - Mini-JV Module
 
-Roland JV-880 synthesizer emulator module for [Move Anything](https://github.com/charlesvestal/move-anything).
+ROM-based PCM synthesizer emulator module for [Move Anything](https://github.com/charlesvestal/move-anything).
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
@@ -8,10 +8,10 @@ Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which i
 
 **Already have ROMs and Move Anything installed?**
 
-1. Launch Move Anything → **Module Store** → **Sound Generators** → **JV-880** → **Install**
+1. Launch Move Anything → **Module Store** → **Sound Generators** → **Mini-JV** → **Install**
 2. Copy your ROM files to Move (see Requirements below)
-3. Select **JV-880** from the main menu
-4. **Play pads** - you're making JV-880 sounds!
+3. Select **Mini-JV** from the main menu
+4. **Play pads** - you're making Mini-JV sounds!
 5. **Jog wheel** to browse 192+ patches
 6. **Encoders 1-8** for quick sound shaping (Cutoff, Resonance, Attack, etc.)
 7. **Menu button** for deep editing
@@ -20,7 +20,7 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 
 ## Features
 
-- Full JV-880 emulation with 192 internal patches
+- Full Mini-JV emulation with 192 internal patches
 - Multiple SR-JV80 expansion card support (sorted alphabetically for easy browsing)
 - Menu-driven parameter editing with real-time value display
 - Encoder macros for quick sound shaping:
@@ -40,7 +40,7 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 
 ## Requirements
 
-JV-880 ROM files (v1.0.0):
+ROM files (v1.0.0):
   - `jv880_rom1.bin` (32KB)
   - `jv880_rom2.bin` (256KB)
   - `jv880_waverom1.bin` (2MB)
@@ -71,14 +71,14 @@ Supported expansion cards:
 
 1. Download and install the module:
 ```bash
-curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main/jv880-module.tar.gz | \
+curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main/minijv-module.tar.gz | \
   ssh ableton@move.local 'tar -xz -C /data/UserData/move-anything/modules/'
 ```
 
 2. Copy your ROM files to the device:
 ```bash
 scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin \
-  ableton@move.local:/data/UserData/move-anything/modules/jv880/roms/
+  ableton@move.local:/data/UserData/move-anything/modules/minijv/roms/
 ```
 
 ### Build from Source
@@ -91,7 +91,7 @@ cd move-anything-jv880
 ./scripts/build.sh
 ```
 
-1. Place your ROM files in `dist/jv880/roms/`
+1. Place your ROM files in `dist/minijv/roms/`
 2. Run:
 ```bash
 ./scripts/install.sh
@@ -103,7 +103,7 @@ See `docs/JV880_MOVE_MANUAL.md` for the full control map and editor workflow.
 
 ## Signal Chain Integration
 
-JV-880 works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using JV-880 with arpeggiators and effects.
+Mini-JV works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using Mini-JV with arpeggiators and effects.
 
 ## Current Limitations
 

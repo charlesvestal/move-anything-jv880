@@ -1,5 +1,5 @@
 /*
- * JV-880 Menu Definitions
+ * Mini-JV Menu Definitions
  *
  * Defines all hierarchical menus using shared menu components.
  */

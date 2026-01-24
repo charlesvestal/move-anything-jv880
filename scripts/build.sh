@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build JV-880 module for Move Anything (ARM64)
+# Build Mini-JV module for Move Anything (ARM64)
 #
 # Automatically uses Docker for cross-compilation if needed.
 # Set CROSS_PREFIX to skip Docker (e.g., for native ARM builds).
@@ -11,7 +11,7 @@ IMAGE_NAME="move-anything-builder"
 
 # Check if we need Docker
 if [ -z "$CROSS_PREFIX" ] && [ ! -f "/.dockerenv" ]; then
-    echo "=== JV-880 Module Build (via Docker) ==="
+    echo "=== Mini-JV Module Build (via Docker) ==="
     echo ""
 
     # Build Docker image if needed
@@ -40,12 +40,12 @@ CROSS_PREFIX="${CROSS_PREFIX:-aarch64-linux-gnu-}"
 
 cd "$REPO_ROOT"
 
-echo "=== Building JV-880 Module ==="
+echo "=== Building Mini-JV Module ==="
 echo "Cross prefix: $CROSS_PREFIX"
 
 # Create build directories
 mkdir -p build
-mkdir -p dist/jv880/roms
+mkdir -p dist/minijv/roms
 
 # Compile DSP plugin (with aggressive optimizations for CM4)
 echo "Compiling DSP plugin..."
@@ -64,28 +64,28 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
 
 # Copy files to dist (use cat to avoid ExtFS deallocation issues with Docker)
 echo "Packaging..."
-cat src/module.json > dist/jv880/module.json
-cat src/ui.js > dist/jv880/ui.js
-cat src/ui_menu.mjs > dist/jv880/ui_menu.mjs
-cat src/ui_browser.mjs > dist/jv880/ui_browser.mjs
-cat src/jv880_sysex.mjs > dist/jv880/jv880_sysex.mjs
-cat build/dsp.so > dist/jv880/dsp.so
-chmod +x dist/jv880/dsp.so
+cat src/module.json > dist/minijv/module.json
+cat src/ui.js > dist/minijv/ui.js
+cat src/ui_menu.mjs > dist/minijv/ui_menu.mjs
+cat src/ui_browser.mjs > dist/minijv/ui_browser.mjs
+cat src/jv880_sysex.mjs > dist/minijv/jv880_sysex.mjs
+cat build/dsp.so > dist/minijv/dsp.so
+chmod +x dist/minijv/dsp.so
 
 # Create tarball for release
 cd dist
-tar -czvf jv880-module.tar.gz jv880/
+tar -czvf minijv-module.tar.gz minijv/
 cd ..
 
 echo ""
 echo "=== Build Complete ==="
-echo "Output: dist/jv880/"
-echo "Tarball: dist/jv880-module.tar.gz"
+echo "Output: dist/minijv/"
+echo "Tarball: dist/minijv-module.tar.gz"
 echo ""
 echo "To install on Move:"
 echo "  ./scripts/install.sh"
 echo ""
-echo "NOTE: You need to provide ROM files in dist/jv880/roms/:"
+echo "NOTE: You need to provide ROM files in dist/minijv/roms/:"
 echo "  - jv880_rom1.bin"
 echo "  - jv880_rom2.bin"
 echo "  - jv880_waverom1.bin"
