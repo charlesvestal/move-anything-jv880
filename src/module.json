@@ -19,6 +19,7 @@
     "midi_channels": 16,
     "chainable": true,
     "component_type": "sound_generator",
+    "default_forward_channel": 1,
     "chain_params": [
       {
         "key": "preset",
