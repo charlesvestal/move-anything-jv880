@@ -3640,6 +3640,85 @@ static void* v2_emu_thread_func(void *arg) {
     return NULL;
 }
 
+/* v2: Helper to queue SysEx for tone parameter changes */
+static void v2_queue_tone_sysex(jv880_instance_t *inst, int toneIdx, int paramIdx, int value) {
+    if (!inst || toneIdx < 0 || toneIdx > 3) return;
+
+    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data checksum F7 */
+    uint8_t addr[4] = { 0x00, 0x08, (uint8_t)(0x28 + toneIdx), (uint8_t)paramIdx };
+    uint8_t data = (uint8_t)(value & 0x7F);
+
+    /* Calculate checksum: 128 - (sum of addr + data) mod 128 */
+    int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
+    uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+
+    uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                          addr[0], addr[1], addr[2], addr[3],
+                          data, chk, 0xF7 };
+
+    /* Queue the SysEx */
+    int write_idx = inst->midi_write;
+    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+    if (next == inst->midi_read) return; /* Queue full */
+
+    memcpy(inst->midi_queue[write_idx], sysex, 12);
+    inst->midi_queue_len[write_idx] = 12;
+    inst->midi_write = next;
+}
+
+/* v2: Helper to queue SysEx for patch common parameter changes */
+static void v2_queue_patch_common_sysex(jv880_instance_t *inst, int paramIdx, int value) {
+    if (!inst) return;
+
+    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data checksum F7 */
+    uint8_t addr[4] = { 0x00, 0x08, 0x20, (uint8_t)paramIdx };
+    uint8_t data = (uint8_t)(value & 0x7F);
+
+    /* Calculate checksum */
+    int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
+    uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+
+    uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                          addr[0], addr[1], addr[2], addr[3],
+                          data, chk, 0xF7 };
+
+    /* Queue the SysEx */
+    int write_idx = inst->midi_write;
+    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+    if (next == inst->midi_read) return;
+
+    memcpy(inst->midi_queue[write_idx], sysex, 12);
+    inst->midi_queue_len[write_idx] = 12;
+    inst->midi_write = next;
+}
+
+/* v2: Helper to queue SysEx for part parameter changes */
+static void v2_queue_part_sysex(jv880_instance_t *inst, int partIdx, int paramIdx, int value) {
+    if (!inst || partIdx < 0 || partIdx > 7) return;
+
+    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data checksum F7 */
+    /* Part address: [0x00, 0x00, 0x18 + partIdx, paramIdx] */
+    uint8_t addr[4] = { 0x00, 0x00, (uint8_t)(0x18 + partIdx), (uint8_t)paramIdx };
+    uint8_t data = (uint8_t)(value & 0x7F);
+
+    /* Calculate checksum */
+    int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
+    uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+
+    uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                          addr[0], addr[1], addr[2], addr[3],
+                          data, chk, 0xF7 };
+
+    /* Queue the SysEx */
+    int write_idx = inst->midi_write;
+    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+    if (next == inst->midi_read) return;
+
+    memcpy(inst->midi_queue[write_idx], sysex, 12);
+    inst->midi_queue_len[write_idx] = 12;
+    inst->midi_write = next;
+}
+
 /* v2: MIDI handler */
 static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
@@ -3858,46 +3937,56 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
     } else if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
         const char *paramName = key + 18;
-        int offset = -1;
+        int sysexIdx = -1;
+        int nvramOffset = -1;
 
-        if (strcmp(paramName, "patchlevel") == 0) offset = 21;
-        else if (strcmp(paramName, "patchpan") == 0) offset = 22;
-        else if (strcmp(paramName, "reverblevel") == 0) offset = 13;
-        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
-        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
-        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
-        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
-        else if (strcmp(paramName, "analogfeel") == 0) offset = 20;
+        /* Map parameter names to both SysEx index and NVRAM offset */
+        if (strcmp(paramName, "reverblevel") == 0) { sysexIdx = 14; nvramOffset = 13; }
+        else if (strcmp(paramName, "reverbtime") == 0) { sysexIdx = 15; nvramOffset = 14; }
+        else if (strcmp(paramName, "choruslevel") == 0) { sysexIdx = 18; nvramOffset = 16; }
+        else if (strcmp(paramName, "chorusdepth") == 0) { sysexIdx = 19; nvramOffset = 17; }
+        else if (strcmp(paramName, "chorusrate") == 0) { sysexIdx = 20; nvramOffset = 18; }
+        else if (strcmp(paramName, "analogfeel") == 0) { sysexIdx = 23; nvramOffset = 20; }
+        else if (strcmp(paramName, "patchlevel") == 0) { sysexIdx = 24; nvramOffset = 21; }
+        else if (strcmp(paramName, "patchpan") == 0) { sysexIdx = 26; nvramOffset = 22; }
 
-        if (offset >= 0) {
+        if (sysexIdx >= 0 && nvramOffset >= 0) {
             const int v = clamp_int(atoi(val), 0, 127);
-            inst->mcu->nvram[NVRAM_PATCH_OFFSET + offset] = (uint8_t)v;
+            /* Update NVRAM directly for immediate UI feedback */
+            inst->mcu->nvram[NVRAM_PATCH_OFFSET + nvramOffset] = (uint8_t)v;
+            /* Send SysEx to emulator for actual sound change */
+            v2_queue_patch_common_sysex(inst, sysexIdx, v);
         }
     } else if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
         int toneIdx = atoi(key + 11);
         const char *underscore = strchr(key + 11, '_');
         if (underscore && toneIdx >= 0 && toneIdx < 4) {
             const char *paramName = underscore + 1;
-            const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
-            int offset = -1;
+            int nvramOffset = -1;
+            int sysexIdx = -1;
 
-            if (strcmp(paramName, "cutofffrequency") == 0) offset = 52;
-            else if (strcmp(paramName, "resonance") == 0) offset = 53;
-            else if (strcmp(paramName, "level") == 0) offset = 67;
-            else if (strcmp(paramName, "pan") == 0) offset = 68;
-            else if (strcmp(paramName, "pitchcoarse") == 0) offset = 37;
-            else if (strcmp(paramName, "pitchfine") == 0) offset = 38;
-            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74;
-            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76;
-            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78;
-            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80;
-            else if (strcmp(paramName, "drylevel") == 0) offset = 81;
-            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82;
-            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83;
+            /* Map parameter names to NVRAM offset and SysEx index (they differ!) */
+            if (strcmp(paramName, "cutofffrequency") == 0) { nvramOffset = 52; sysexIdx = 74; }
+            else if (strcmp(paramName, "resonance") == 0) { nvramOffset = 53; sysexIdx = 75; }
+            else if (strcmp(paramName, "level") == 0) { nvramOffset = 67; sysexIdx = 92; }
+            else if (strcmp(paramName, "pan") == 0) { nvramOffset = 68; sysexIdx = 94; }
+            else if (strcmp(paramName, "pitchcoarse") == 0) { nvramOffset = 37; sysexIdx = 56; }
+            else if (strcmp(paramName, "pitchfine") == 0) { nvramOffset = 38; sysexIdx = 57; }
+            else if (strcmp(paramName, "tvaenvtime1") == 0) { nvramOffset = 74; sysexIdx = 105; }
+            else if (strcmp(paramName, "tvaenvtime2") == 0) { nvramOffset = 76; sysexIdx = 107; }
+            else if (strcmp(paramName, "tvaenvtime3") == 0) { nvramOffset = 78; sysexIdx = 109; }
+            else if (strcmp(paramName, "tvaenvtime4") == 0) { nvramOffset = 80; sysexIdx = 111; }
+            else if (strcmp(paramName, "drylevel") == 0) { nvramOffset = 81; sysexIdx = 112; }
+            else if (strcmp(paramName, "reverbsendlevel") == 0) { nvramOffset = 82; sysexIdx = 113; }
+            else if (strcmp(paramName, "chorussendlevel") == 0) { nvramOffset = 83; sysexIdx = 114; }
 
-            if (offset >= 0 && offset < 84) {
+            if (nvramOffset >= 0 && sysexIdx >= 0) {
                 const int v = clamp_int(atoi(val), 0, 127);
-                inst->mcu->nvram[toneBase + offset] = (uint8_t)v;
+                const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+                /* Update NVRAM directly for immediate UI feedback */
+                inst->mcu->nvram[toneBase + nvramOffset] = (uint8_t)v;
+                /* Send SysEx to emulator for actual sound change */
+                v2_queue_tone_sysex(inst, toneIdx, sysexIdx, v);
             }
         }
     } else if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
@@ -3905,47 +3994,53 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
             const char *paramName = key + 12;
             const int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
-            int offset = -1;
+            int sramOffset = -1;
+            int sysexIdx = -1;
 
-            if (strcmp(paramName, "partlevel") == 0) offset = 17;
-            else if (strcmp(paramName, "partpan") == 0) offset = 18;
-            else if (strcmp(paramName, "patchnumber") == 0) offset = 16;
-            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
-            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
+            /* Map parameter names to SRAM offset and SysEx index */
+            if (strcmp(paramName, "partlevel") == 0) { sramOffset = 17; sysexIdx = 25; }
+            else if (strcmp(paramName, "partpan") == 0) { sramOffset = 18; sysexIdx = 26; }
+            else if (strcmp(paramName, "patchnumber") == 0) { sramOffset = 16; sysexIdx = 23; }
+            else if (strcmp(paramName, "internalkeyrangelower") == 0) { sramOffset = 10; sysexIdx = 15; }
+            else if (strcmp(paramName, "internalkeyrangeupper") == 0) { sramOffset = 11; sysexIdx = 16; }
+            else if (strcmp(paramName, "internalvelocitysense") == 0) { sramOffset = 13; sysexIdx = 18; }
+            else if (strcmp(paramName, "internalvelocitymax") == 0) { sramOffset = 14; sysexIdx = 19; }
 
+            /* Handle reverbswitch and chorusswitch (bit fields) */
             if (strcmp(paramName, "reverbswitch") == 0) {
+                const int v = atoi(val) ? 1 : 0;
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
-                if (atoi(val)) *b |= 0x40;
+                if (v) *b |= 0x40;
                 else *b &= ~0x40;
+                v2_queue_part_sysex(inst, partIdx, 29, v);
                 return;
             }
             if (strcmp(paramName, "chorusswitch") == 0) {
+                const int v = atoi(val) ? 1 : 0;
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
-                if (atoi(val)) *b |= 0x20;
+                if (v) *b |= 0x20;
                 else *b &= ~0x20;
+                v2_queue_part_sysex(inst, partIdx, 30, v);
                 return;
             }
 
-            if (strcmp(paramName, "partcoarsetune") == 0 ||
-                strcmp(paramName, "partfinetune") == 0 ||
-                strcmp(paramName, "internalkeytranspose") == 0) {
-                if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
-                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
-                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
+            /* Handle signed parameters (coarse/fine tune, transpose) */
+            if (strcmp(paramName, "partcoarsetune") == 0) { sramOffset = 19; sysexIdx = 27; }
+            else if (strcmp(paramName, "partfinetune") == 0) { sramOffset = 20; sysexIdx = 28; }
+            else if (strcmp(paramName, "internalkeytranspose") == 0) { sramOffset = 12; sysexIdx = 17; }
 
-                if (offset >= 0) {
-                    int v = clamp_int(atoi(val), 0, 127);
+            if (sramOffset >= 0 && sysexIdx >= 0) {
+                int v = clamp_int(atoi(val), 0, 127);
+                /* Check if this is a signed parameter (tune/transpose) */
+                if (sramOffset == 19 || sramOffset == 20 || sramOffset == 12) {
                     int stored = v - 64;
                     if (stored < -64) stored = -64;
                     if (stored > 63) stored = 63;
-                    inst->mcu->sram[partBase + offset] = (uint8_t)(int8_t)stored;
+                    inst->mcu->sram[partBase + sramOffset] = (uint8_t)(int8_t)stored;
+                } else {
+                    inst->mcu->sram[partBase + sramOffset] = (uint8_t)v;
                 }
-                return;
-            }
-
-            if (offset >= 0) {
-                const int v = clamp_int(atoi(val), 0, 127);
-                inst->mcu->sram[partBase + offset] = (uint8_t)v;
+                v2_queue_part_sysex(inst, partIdx, sysexIdx, v);
             }
         }
     }
