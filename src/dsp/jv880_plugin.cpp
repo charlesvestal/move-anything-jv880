@@ -3877,10 +3877,61 @@ static int clamp_int(int value, int min_val, int max_val) {
     return value;
 }
 
+/* Helper to extract a JSON number value by key */
+static int json_get_number(const char *json, const char *key, float *out) {
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *pos = strstr(json, search);
+    if (!pos) return -1;
+    pos += strlen(search);
+    while (*pos == ' ') pos++;
+    *out = (float)atof(pos);
+    return 0;
+}
+
 /* v2: Set parameter - full expansion support */
 static void v2_set_param(void *instance, const char *key, const char *val) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
     if (!inst) return;
+
+    /* State restore from patch save */
+    if (strcmp(key, "state") == 0) {
+        float f;
+        /* Restore mode first */
+        if (json_get_number(val, "mode", &f) == 0) {
+            v2_set_mode(inst, (int)f);
+        }
+        /* Restore preset or performance based on mode */
+        if (inst->performance_mode) {
+            if (json_get_number(val, "performance", &f) == 0) {
+                int perf = (int)f;
+                if (perf >= 0 && perf < NUM_PERFORMANCES) {
+                    v2_select_performance(inst, perf);
+                }
+            }
+            if (json_get_number(val, "part", &f) == 0) {
+                int part = (int)f;
+                if (part >= 0 && part <= 7) {
+                    v2_select_part(inst, part);
+                }
+            }
+        } else {
+            if (json_get_number(val, "preset", &f) == 0) {
+                int preset = (int)f;
+                if (preset >= 0 && preset < inst->total_patches) {
+                    v2_select_patch(inst, preset);
+                }
+            }
+        }
+        /* Restore octave transpose */
+        if (json_get_number(val, "octave_transpose", &f) == 0) {
+            int oct = (int)f;
+            if (oct < -3) oct = -3;
+            if (oct > 3) oct = 3;
+            inst->octave_transpose = oct;
+        }
+        return;
+    }
 
     if (strcmp(key, "preset") == 0) {
         int idx = atoi(val);
@@ -4105,6 +4156,16 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     if (strcmp(key, "octave_transpose") == 0) {
         return snprintf(buf, buf_len, "%d", inst->octave_transpose);
+    }
+    /* State serialization for patch save/load */
+    if (strcmp(key, "state") == 0) {
+        return snprintf(buf, buf_len,
+            "{\"mode\":%d,\"preset\":%d,\"performance\":%d,\"part\":%d,\"octave_transpose\":%d}",
+            inst->performance_mode ? 1 : 0,
+            inst->current_patch,
+            inst->current_performance,
+            inst->current_part,
+            inst->octave_transpose);
     }
     if (strcmp(key, "loading_complete") == 0) {
         return snprintf(buf, buf_len, "%d", inst->loading_complete);
