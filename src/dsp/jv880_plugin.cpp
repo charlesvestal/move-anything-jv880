@@ -3792,6 +3792,12 @@ static void v2_select_part(jv880_instance_t *inst, int part_index) {
     fprintf(stderr, "JV880 v2: Selected part %d\n", part_index + 1);
 }
 
+static int clamp_int(int value, int min_val, int max_val) {
+    if (value < min_val) return min_val;
+    if (value > max_val) return max_val;
+    return value;
+}
+
 /* v2: Set parameter - full expansion support */
 static void v2_set_param(void *instance, const char *key, const char *val) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
@@ -3849,6 +3855,98 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             inst->current_expansion = exp_idx;
             fprintf(stderr, "JV880 v2: Loaded expansion %d (%s) at bank offset %d\n",
                     exp_idx, inst->expansions[exp_idx].name, bank_offset);
+        }
+    } else if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
+        const char *paramName = key + 18;
+        int offset = -1;
+
+        if (strcmp(paramName, "patchlevel") == 0) offset = 21;
+        else if (strcmp(paramName, "patchpan") == 0) offset = 22;
+        else if (strcmp(paramName, "reverblevel") == 0) offset = 13;
+        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
+        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
+        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
+        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
+        else if (strcmp(paramName, "analogfeel") == 0) offset = 20;
+
+        if (offset >= 0) {
+            const int v = clamp_int(atoi(val), 0, 127);
+            inst->mcu->nvram[NVRAM_PATCH_OFFSET + offset] = (uint8_t)v;
+        }
+    } else if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
+        int toneIdx = atoi(key + 11);
+        const char *underscore = strchr(key + 11, '_');
+        if (underscore && toneIdx >= 0 && toneIdx < 4) {
+            const char *paramName = underscore + 1;
+            const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+            int offset = -1;
+
+            if (strcmp(paramName, "cutofffrequency") == 0) offset = 52;
+            else if (strcmp(paramName, "resonance") == 0) offset = 53;
+            else if (strcmp(paramName, "level") == 0) offset = 67;
+            else if (strcmp(paramName, "pan") == 0) offset = 68;
+            else if (strcmp(paramName, "pitchcoarse") == 0) offset = 37;
+            else if (strcmp(paramName, "pitchfine") == 0) offset = 38;
+            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74;
+            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76;
+            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78;
+            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80;
+            else if (strcmp(paramName, "drylevel") == 0) offset = 81;
+            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82;
+            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83;
+
+            if (offset >= 0 && offset < 84) {
+                const int v = clamp_int(atoi(val), 0, 127);
+                inst->mcu->nvram[toneBase + offset] = (uint8_t)v;
+            }
+        }
+    } else if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
+        int partIdx = key[10] - '0';
+        if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
+            const char *paramName = key + 12;
+            const int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
+            int offset = -1;
+
+            if (strcmp(paramName, "partlevel") == 0) offset = 17;
+            else if (strcmp(paramName, "partpan") == 0) offset = 18;
+            else if (strcmp(paramName, "patchnumber") == 0) offset = 16;
+            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
+            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
+
+            if (strcmp(paramName, "reverbswitch") == 0) {
+                uint8_t *b = &inst->mcu->sram[partBase + 21];
+                if (atoi(val)) *b |= 0x40;
+                else *b &= ~0x40;
+                return;
+            }
+            if (strcmp(paramName, "chorusswitch") == 0) {
+                uint8_t *b = &inst->mcu->sram[partBase + 21];
+                if (atoi(val)) *b |= 0x20;
+                else *b &= ~0x20;
+                return;
+            }
+
+            if (strcmp(paramName, "partcoarsetune") == 0 ||
+                strcmp(paramName, "partfinetune") == 0 ||
+                strcmp(paramName, "internalkeytranspose") == 0) {
+                if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
+                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
+                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
+
+                if (offset >= 0) {
+                    int v = clamp_int(atoi(val), 0, 127);
+                    int stored = v - 64;
+                    if (stored < -64) stored = -64;
+                    if (stored > 63) stored = 63;
+                    inst->mcu->sram[partBase + offset] = (uint8_t)(int8_t)stored;
+                }
+                return;
+            }
+
+            if (offset >= 0) {
+                const int v = clamp_int(atoi(val), 0, 127);
+                inst->mcu->sram[partBase + offset] = (uint8_t)v;
+            }
         }
     }
 }
@@ -4006,6 +4104,106 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "---");
     }
 
+    /* Hierarchical parameter getters for Shadow UI
+     * These read the same memory locations as v1 API but use instance pointer
+     */
+
+    /* Read tone parameter: nvram_tone_<toneIdx>_<paramName> */
+    if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
+        int toneIdx = atoi(key + 11);
+        const char* underscore = strchr(key + 11, '_');
+        if (underscore && toneIdx >= 0 && toneIdx < 4) {
+            const char* paramName = underscore + 1;
+            int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+            int offset = -1;
+
+            /* Map parameter names to NVRAM offsets within tone */
+            if (strcmp(paramName, "cutofffrequency") == 0) offset = 52;
+            else if (strcmp(paramName, "resonance") == 0) offset = 53;
+            else if (strcmp(paramName, "level") == 0) offset = 67;
+            else if (strcmp(paramName, "pan") == 0) offset = 68;
+            else if (strcmp(paramName, "pitchcoarse") == 0) offset = 37;
+            else if (strcmp(paramName, "pitchfine") == 0) offset = 38;
+            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74;
+            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76;
+            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78;
+            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80;
+            else if (strcmp(paramName, "drylevel") == 0) offset = 81;
+            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82;
+            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83;
+
+            if (offset >= 0 && offset < 84) {
+                uint8_t val = inst->mcu->nvram[toneBase + offset];
+                return snprintf(buf, buf_len, "%d", val);
+            }
+        }
+    }
+
+    /* Read patch common parameter: nvram_patchCommon_<paramName> */
+    if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
+        const char* paramName = key + 18;
+        int offset = -1;
+
+        if (strcmp(paramName, "patchlevel") == 0) offset = 21;
+        else if (strcmp(paramName, "patchpan") == 0) offset = 22;
+        else if (strcmp(paramName, "analogfeel") == 0) offset = 20;
+        else if (strcmp(paramName, "reverblevel") == 0) offset = 13;
+        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
+        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
+        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
+        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
+
+        if (offset >= 0 && offset < 26) {
+            uint8_t val = inst->mcu->nvram[NVRAM_PATCH_OFFSET + offset];
+            return snprintf(buf, buf_len, "%d", val);
+        }
+    }
+
+    /* Read part parameter: sram_part_<partIdx>_<paramName> */
+    if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
+        int partIdx = key[10] - '0';
+        if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
+            const char* paramName = key + 12;
+            int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
+            int offset = -1;
+
+            /* Direct storage parameters */
+            if (strcmp(paramName, "partlevel") == 0) offset = 17;
+            else if (strcmp(paramName, "partpan") == 0) offset = 18;
+            else if (strcmp(paramName, "patchnumber") == 0) offset = 16;
+            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
+            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
+
+            /* Handle reverbswitch and chorusswitch as bit fields */
+            if (strcmp(paramName, "reverbswitch") == 0) {
+                uint8_t b = inst->mcu->sram[partBase + 21];
+                return snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+            }
+            if (strcmp(paramName, "chorusswitch") == 0) {
+                uint8_t b = inst->mcu->sram[partBase + 21];
+                return snprintf(buf, buf_len, "%d", (b >> 5) & 1);
+            }
+
+            /* Signed offset parameters: stored = (val-64), read = (stored+64) */
+            if (strcmp(paramName, "partcoarsetune") == 0 ||
+                strcmp(paramName, "partfinetune") == 0 ||
+                strcmp(paramName, "internalkeytranspose") == 0) {
+                if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
+                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
+                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
+                if (offset >= 0) {
+                    int8_t stored = (int8_t)inst->mcu->sram[partBase + offset];
+                    int val = stored + 64;
+                    return snprintf(buf, buf_len, "%d", val);
+                }
+            }
+
+            if (offset >= 0) {
+                return snprintf(buf, buf_len, "%d", inst->mcu->sram[partBase + offset]);
+            }
+        }
+    }
+
     /* UI hierarchy for shadow parameter editor
      * JV-880 has two modes: patch and performance
      * - Patch mode: browse patches → tones (1-4) → tone params
@@ -4065,10 +4263,12 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* Chain params metadata for shadow parameter editor */
     if (strcmp(key, "chain_params") == 0) {
         const char *params_json = "["
+            /* Basic navigation */
             "{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":9999},"
             "{\"key\":\"performance\",\"name\":\"Performance\",\"type\":\"int\",\"min\":0,\"max\":47},"
             "{\"key\":\"part\",\"name\":\"Part\",\"type\":\"int\",\"min\":0,\"max\":7},"
             "{\"key\":\"octave_transpose\",\"name\":\"Octave\",\"type\":\"int\",\"min\":-3,\"max\":3},"
+            /* Patch common params */
             "{\"key\":\"nvram_patchCommon_patchlevel\",\"name\":\"Patch Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_patchpan\",\"name\":\"Patch Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Reverb Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
@@ -4077,16 +4277,31 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"key\":\"nvram_patchCommon_chorusdepth\",\"name\":\"Chorus Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusrate\",\"name\":\"Chorus Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_analogfeel\",\"name\":\"Analog Feel\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params (suffix only - child_prefix adds nvram_tone_N_) */
             "{\"key\":\"cutofffrequency\",\"name\":\"Cutoff\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"level\",\"name\":\"Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"pan\",\"name\":\"Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"pitchcoarse\",\"name\":\"Pitch Coarse\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"pitchfine\",\"name\":\"Pitch Fine\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime1\",\"name\":\"Attack\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime2\",\"name\":\"Decay\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime3\",\"name\":\"Sustain\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime4\",\"name\":\"Release\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"drylevel\",\"name\":\"Dry Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"reverbsendlevel\",\"name\":\"Reverb Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"chorussendlevel\",\"name\":\"Chorus Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Part params (suffix only - child_prefix adds sram_part_N_) */
             "{\"key\":\"partlevel\",\"name\":\"Part Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"partpan\",\"name\":\"Part Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"patchnumber\",\"name\":\"Patch\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"reverbswitch\",\"name\":\"Reverb Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
             "{\"key\":\"chorusswitch\",\"name\":\"Chorus Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
             "{\"key\":\"partcoarsetune\",\"name\":\"Coarse Tune\",\"type\":\"int\",\"min\":16,\"max\":112},"
-            "{\"key\":\"partfinetune\",\"name\":\"Fine Tune\",\"type\":\"int\",\"min\":14,\"max\":114}"
+            "{\"key\":\"partfinetune\",\"name\":\"Fine Tune\",\"type\":\"int\",\"min\":14,\"max\":114},"
+            "{\"key\":\"internalkeyrangelower\",\"name\":\"Key Lo\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"internalkeyrangeupper\",\"name\":\"Key Hi\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"internalkeytranspose\",\"name\":\"Transpose\",\"type\":\"int\",\"min\":16,\"max\":112}"
         "]";
         int len = strlen(params_json);
         if (len < buf_len) {
