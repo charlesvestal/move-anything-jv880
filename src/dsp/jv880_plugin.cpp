@@ -41,8 +41,10 @@ static uint8_t *g_rom2 = nullptr;
 #define PATCH_OFFSET_INTERNAL   0x008ce0  /* Internal bank (JV Strings, etc.) */
 #define PATCH_OFFSET_PRESET_A   0x010ce0  /* Preset A (A.Piano 1, etc.) */
 #define PATCH_OFFSET_PRESET_B   0x018ce0  /* Preset B (Pizzicato, etc.) */
-#define NVRAM_PATCH_OFFSET      0x0d70
+#define NVRAM_PATCH_OFFSET      0x0d70    /* Working patch area (362 bytes) */
 #define NVRAM_MODE_OFFSET       0x11
+#define NVRAM_PATCH_INTERNAL    0x1000    /* User patch storage: 64 × 362 = 23168 bytes (up to 0x6A80) */
+#define NUM_USER_PATCHES        64
 
 /* Performance data constants
  * Performance structure is 204 bytes (0xCC)
@@ -2822,6 +2824,10 @@ typedef struct {
     /* Other settings */
     int octave_transpose;
 
+    /* Deferred state restoration (applied after loading completes) */
+    char pending_state[512];
+    int pending_state_valid;
+
     /* Error state */
     char load_error[256];
 } jv880_instance_t;
@@ -2842,6 +2848,7 @@ static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index)
 static void v2_select_patch(jv880_instance_t *inst, int global_index);
 static void v2_select_performance(jv880_instance_t *inst, int perf_index);
 static void v2_send_all_notes_off(jv880_instance_t *inst);
+static void v2_set_param(void *instance, const char *key, const char *val);
 
 /* v2: Get file size helper */
 static uint32_t v2_get_file_size(const char *path) {
@@ -3383,6 +3390,14 @@ static void* v2_load_thread_func(void *arg) {
     snprintf(inst->loading_status, sizeof(inst->loading_status),
              "Ready: %d patches in %d banks", inst->total_patches, inst->bank_count);
 
+    /* Apply any pending state that was queued during loading */
+    if (inst->pending_state_valid) {
+        fprintf(stderr, "JV880 v2: Applying deferred state restoration\n");
+        inst->pending_state_valid = 0;
+        /* Re-call set_param now that loading is complete */
+        v2_set_param(inst, "state", inst->pending_state);
+    }
+
     fprintf(stderr, "JV880 v2: Ready!\n");
     inst->load_thread_running = 0;
     return NULL;
@@ -3896,10 +3911,29 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
 
     /* State restore from patch save */
     if (strcmp(key, "state") == 0) {
+        /* If loading isn't complete, queue the state for later application */
+        if (!inst->loading_complete) {
+            strncpy(inst->pending_state, val, sizeof(inst->pending_state) - 1);
+            inst->pending_state[sizeof(inst->pending_state) - 1] = '\0';
+            inst->pending_state_valid = 1;
+            fprintf(stderr, "JV880 v2: Queued state for deferred restoration\n");
+            return;
+        }
+
         float f;
         /* Restore mode first */
         if (json_get_number(val, "mode", &f) == 0) {
             v2_set_mode(inst, (int)f);
+        }
+        /* Restore expansion card selection (for performance mode) */
+        if (json_get_number(val, "expansion_index", &f) == 0) {
+            int exp_idx = (int)f;
+            if (exp_idx >= -1 && exp_idx < inst->expansion_count) {
+                inst->current_expansion = exp_idx;
+            }
+        }
+        if (json_get_number(val, "expansion_bank_offset", &f) == 0) {
+            inst->expansion_bank_offset = (int)f;
         }
         /* Restore preset or performance based on mode */
         if (inst->performance_mode) {
@@ -3926,8 +3960,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         /* Restore octave transpose */
         if (json_get_number(val, "octave_transpose", &f) == 0) {
             int oct = (int)f;
-            if (oct < -3) oct = -3;
-            if (oct > 3) oct = 3;
+            if (oct < -4) oct = -4;
+            if (oct > 4) oct = 4;
             inst->octave_transpose = oct;
         }
         return;
@@ -3953,8 +3987,16 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     } else if (strcmp(key, "prev_bank") == 0) {
         v2_jump_to_bank(inst, -1);
     } else if (strcmp(key, "mode") == 0) {
-        /* Switch between patch (0) and performance (1) mode */
-        int mode = atoi(val);
+        /* Switch between patch (0) and performance (1) mode
+         * Accept both string names and numeric indices for enum compatibility */
+        int mode;
+        if (strcmp(val, "Patch") == 0 || strcmp(val, "patch") == 0) {
+            mode = 0;
+        } else if (strcmp(val, "Performance") == 0 || strcmp(val, "performance") == 0) {
+            mode = 1;
+        } else {
+            mode = atoi(val);
+        }
         v2_set_mode(inst, mode);
     } else if (strcmp(key, "performance") == 0) {
         /* Select performance 0-47 */
@@ -3969,7 +4011,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (part > 7) part = 7;
         v2_select_part(inst, part);
     } else if (strcmp(key, "load_expansion") == 0) {
-        /* Load a specific expansion card by index */
+        /* Load a specific expansion card by index (for performance mode Card patches) */
         int exp_idx = atoi(val);
         int bank_offset = 0;
         const char *comma = strchr(val, ',');
@@ -3986,6 +4028,21 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             fprintf(stderr, "JV880 v2: Loaded expansion %d (%s) at bank offset %d\n",
                     exp_idx, inst->expansions[exp_idx].name, bank_offset);
         }
+    } else if (strcmp(key, "jump_to_expansion") == 0) {
+        /* Jump to first patch of expansion (for patch browsing) */
+        int exp_idx = atoi(val);
+        if (exp_idx >= 0 && exp_idx < inst->expansion_count) {
+            int first_patch = inst->expansions[exp_idx].first_global_index;
+            if (first_patch >= 0 && first_patch < inst->total_patches) {
+                v2_select_patch(inst, first_patch);
+                fprintf(stderr, "JV880 v2: Jumped to expansion %d (%s) at patch %d\n",
+                        exp_idx, inst->expansions[exp_idx].name, first_patch);
+            }
+        }
+    } else if (strcmp(key, "jump_to_internal") == 0) {
+        /* Jump to first internal patch (Preset A) */
+        v2_select_patch(inst, 0);
+        fprintf(stderr, "JV880 v2: Jumped to internal patches\n");
     } else if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
         const char *paramName = key + 18;
         int sysexIdx = -1;
@@ -4094,6 +4151,68 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 v2_queue_part_sysex(inst, partIdx, sysexIdx, v);
             }
         }
+    } else if (strncmp(key, "write_patch_", 12) == 0 && inst->mcu) {
+        /* Write current working patch to user patch slot (0-63)
+         * Copies working patch from NVRAM_PATCH_OFFSET to NVRAM_PATCH_INTERNAL
+         * Usage: write_patch_<slot> where slot is 0-63 */
+        int slot = atoi(key + 12);
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t dest_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            memcpy(&inst->mcu->nvram[dest_offset],
+                   &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            memcpy(name, &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_NAME_LEN);
+            name[PATCH_NAME_LEN] = '\0';
+            fprintf(stderr, "JV880 v2: Wrote patch '%s' to User slot %d (NVRAM 0x%04x)\n",
+                    name, slot + 1, dest_offset);
+        } else {
+            fprintf(stderr, "JV880 v2: Invalid patch slot %d (must be 0-63)\n", slot);
+        }
+    } else if (strncmp(key, "write_performance_", 18) == 0 && inst->mcu) {
+        /* Write temp performance to Internal slot (0-15)
+         * Copies temp performance from SRAM to NVRAM Internal slot */
+        int slot = atoi(key + 18);
+        if (slot >= 0 && slot < 16) {
+            uint32_t nvram_offset = NVRAM_PERF_INTERNAL + (slot * PERF_SIZE);
+            memcpy(&inst->mcu->nvram[nvram_offset],
+                   &inst->mcu->sram[SRAM_TEMP_PERF_OFFSET], PERF_SIZE);
+            char name[13];
+            memcpy(name, &inst->mcu->sram[SRAM_TEMP_PERF_OFFSET], 12);
+            name[12] = '\0';
+            fprintf(stderr, "JV880 v2: Wrote performance '%s' to Internal slot %d (NVRAM 0x%04x)\n",
+                    name, slot + 1, nvram_offset);
+        } else {
+            fprintf(stderr, "JV880 v2: Invalid performance slot %d (must be 0-15)\n", slot);
+        }
+    } else if (strcmp(key, "save_nvram") == 0 && inst->mcu) {
+        /* Save NVRAM to disk (persists patches and performances) */
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/roms/jv880_nvram.bin", inst->module_dir);
+        FILE* f = fopen(path, "wb");
+        if (f) {
+            fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
+            fclose(f);
+            fprintf(stderr, "JV880 v2: Saved NVRAM to %s\n", path);
+        } else {
+            fprintf(stderr, "JV880 v2: Failed to save NVRAM to %s\n", path);
+        }
+    } else if (strcmp(key, "load_user_patch") == 0 && inst->mcu) {
+        /* Load a user patch from NVRAM into working area */
+        int slot = atoi(val);
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t src_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            /* Check if slot has valid data (not 0xFF filled) */
+            if (inst->mcu->nvram[src_offset] != 0xFF) {
+                memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET],
+                       &inst->mcu->nvram[src_offset], PATCH_SIZE);
+                char name[PATCH_NAME_LEN + 1];
+                memcpy(name, &inst->mcu->nvram[src_offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                fprintf(stderr, "JV880 v2: Loaded user patch '%s' from slot %d\n", name, slot + 1);
+            } else {
+                fprintf(stderr, "JV880 v2: User patch slot %d is empty\n", slot + 1);
+            }
+        }
     }
 }
 
@@ -4160,12 +4279,15 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* State serialization for patch save/load */
     if (strcmp(key, "state") == 0) {
         return snprintf(buf, buf_len,
-            "{\"mode\":%d,\"preset\":%d,\"performance\":%d,\"part\":%d,\"octave_transpose\":%d}",
+            "{\"mode\":%d,\"preset\":%d,\"performance\":%d,\"part\":%d,\"octave_transpose\":%d,"
+            "\"expansion_index\":%d,\"expansion_bank_offset\":%d}",
             inst->performance_mode ? 1 : 0,
             inst->current_patch,
             inst->current_performance,
             inst->current_part,
-            inst->octave_transpose);
+            inst->octave_transpose,
+            inst->current_expansion,
+            inst->expansion_bank_offset);
     }
     if (strcmp(key, "loading_complete") == 0) {
         return snprintf(buf, buf_len, "%d", inst->loading_complete);
@@ -4211,8 +4333,11 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             return snprintf(buf, buf_len, "%d", pos);
         }
     }
-    /* Mode information */
-    if (strcmp(key, "mode") == 0 || strcmp(key, "performance_mode") == 0) {
+    /* Mode information - return string for enum compatibility */
+    if (strcmp(key, "mode") == 0) {
+        return snprintf(buf, buf_len, "%s", inst->performance_mode ? "Performance" : "Patch");
+    }
+    if (strcmp(key, "performance_mode") == 0) {
         return snprintf(buf, buf_len, "%d", inst->performance_mode);
     }
     if (strcmp(key, "current_performance") == 0 || strcmp(key, "performance") == 0) {
@@ -4236,6 +4361,70 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     if (strcmp(key, "expansion_bank_offset") == 0) {
         return snprintf(buf, buf_len, "%d", inst->expansion_bank_offset);
+    }
+    /* Expansion list for "Choose Expansion" menu - returns JSON array */
+    if (strcmp(key, "expansion_list") == 0) {
+        int written = snprintf(buf, buf_len, "[");
+        for (int i = 0; i < inst->expansion_count && written < buf_len - 100; i++) {
+            if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
+            written += snprintf(buf + written, buf_len - written,
+                "{\"index\":%d,\"name\":\"%s\",\"first_patch\":%d,\"patch_count\":%d}",
+                i, inst->expansions[i].name, inst->expansions[i].first_global_index,
+                inst->expansions[i].patch_count);
+        }
+        written += snprintf(buf + written, buf_len - written, "]");
+        return written;
+    }
+    /* User patch list for "Load User Patch" menu - returns JSON array of saved patches */
+    if (strcmp(key, "user_patch_list") == 0 && inst->mcu) {
+        int written = snprintf(buf, buf_len, "[");
+        for (int i = 0; i < NUM_USER_PATCHES && written < buf_len - 100; i++) {
+            uint32_t offset = NVRAM_PATCH_INTERNAL + (i * PATCH_SIZE);
+            /* Check if slot has valid data (not 0xFF filled) */
+            if (inst->mcu->nvram[offset] != 0xFF) {
+                char name[PATCH_NAME_LEN + 1];
+                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                /* Trim trailing spaces */
+                int len = PATCH_NAME_LEN;
+                while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == 0)) len--;
+                name[len] = '\0';
+                if (written > 1) written += snprintf(buf + written, buf_len - written, ",");
+                written += snprintf(buf + written, buf_len - written,
+                    "{\"index\":%d,\"name\":\"%s\"}", i, name);
+            }
+        }
+        written += snprintf(buf + written, buf_len - written, "]");
+        return written;
+    }
+    /* User patch info: user_patch_<idx>_name */
+    if (strncmp(key, "user_patch_", 11) == 0 && inst->mcu) {
+        int idx = atoi(key + 11);
+        if (strstr(key, "_name") && idx >= 0 && idx < NUM_USER_PATCHES) {
+            uint32_t offset = NVRAM_PATCH_INTERNAL + (idx * PATCH_SIZE);
+            if (inst->mcu->nvram[offset] != 0xFF) {
+                char name[PATCH_NAME_LEN + 1];
+                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                return snprintf(buf, buf_len, "%s", name);
+            }
+            return snprintf(buf, buf_len, "(empty)");
+        }
+    }
+    /* Individual expansion info: expansion_<idx>_name, expansion_<idx>_patch_count, expansion_<idx>_first_patch */
+    if (strncmp(key, "expansion_", 10) == 0) {
+        int idx = atoi(key + 10);
+        if (idx >= 0 && idx < inst->expansion_count) {
+            if (strstr(key, "_name")) {
+                return snprintf(buf, buf_len, "%s", inst->expansions[idx].name);
+            }
+            if (strstr(key, "_patch_count")) {
+                return snprintf(buf, buf_len, "%d", inst->expansions[idx].patch_count);
+            }
+            if (strstr(key, "_first_patch")) {
+                return snprintf(buf, buf_len, "%d", inst->expansions[idx].first_global_index);
+            }
+        }
     }
     /* Bank queries: bank_<idx>_name, bank_<idx>_start, bank_<idx>_count */
     if (strncmp(key, "bank_", 5) == 0) {
