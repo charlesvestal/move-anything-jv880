@@ -2,7 +2,7 @@
   "id": "minijv",
   "name": "Mini-JV",
   "abbrev": "JV",
-  "version": "0.3.11",
+  "version": "0.4.0",
   "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz",
   "license": "Non-commercial",
@@ -22,11 +22,34 @@
     "default_forward_channel": 1,
     "chain_params": [
       {
+        "key": "mode",
+        "name": "Mode",
+        "type": "enum",
+        "options": ["Patch", "Performance"],
+        "default": 0
+      },
+      {
         "key": "preset",
         "name": "Preset",
         "type": "int",
         "min": 0,
         "max_param": "preset_count",
+        "default": 0
+      },
+      {
+        "key": "performance",
+        "name": "Performance",
+        "type": "int",
+        "min": 0,
+        "max": 47,
+        "default": 0
+      },
+      {
+        "key": "octave_transpose",
+        "name": "Octave",
+        "type": "int",
+        "min": -4,
+        "max": 4,
         "default": 0
       }
     ]

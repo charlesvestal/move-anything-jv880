@@ -25,12 +25,22 @@ src/
 
 ### Plugin API
 
-Implements Move Anything plugin_api_v1:
-- `on_load`: Loads ROMs, initializes emulator, builds patch list
+Implements Move Anything plugin_api_v1/v2:
+- `on_load`/`create_instance`: Loads ROMs, initializes emulator, builds patch list
 - `on_midi`: Queues MIDI for emulator thread
-- `set_param`: preset, octave_transpose, program_change, next_bank, prev_bank
-- `get_param`: preset_name, patch_name, octave_transpose, current_patch, bank_name, etc.
+- `set_param`: preset, octave_transpose, program_change, next_bank, prev_bank, mode, performance, part, jump_to_expansion, load_user_patch, write_patch_N, write_performance_N, save_nvram
+- `get_param`: preset_name, patch_name, octave_transpose, current_patch, bank_name, mode, expansion_list, user_patch_list, state, etc.
 - `render_block`: Pulls audio from ring buffer filled by emulator thread
+
+### State Serialization
+
+State is saved/restored via `state` parameter containing JSON:
+- mode (Patch/Performance)
+- preset, performance, part indices
+- octave_transpose
+- expansion_index, expansion_bank_offset
+
+**Deferred state restoration**: If state is set before loading completes, it's queued and applied after warmup finishes.
 
 ### Expansion ROM Support
 
@@ -52,6 +62,20 @@ Background thread runs emulator at accelerated rate to fill audio ring buffer. M
 - Supports reading/writing part parameters (level, pan, tune, patch, key range, velocity)
 - Performances saved to NVRAM Internal slots (0x00b0, 16 slots × 204 bytes)
 - Expansion card selection determines which expansion provides Card patches (patchnumber 64-127)
+
+### User Patch Storage
+
+- 64 user patch slots in NVRAM (0x1000-0x6A80)
+- Save edited patches via Edit > Save Patch menu
+- Load saved patches via Main > User Patches menu
+- Patches persist to jv880_nvram.bin via save_nvram
+
+### Jump to Expansion
+
+- Main menu includes "Jump to Expansion" option
+- Lists all loaded expansions with patch counts
+- Selecting an expansion jumps to its first patch in the unified list
+- Provides quick access without scrolling through full patch list
 
 ### Mode-Specific UI
 

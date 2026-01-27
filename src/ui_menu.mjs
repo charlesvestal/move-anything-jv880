@@ -28,10 +28,69 @@ function getState() {
 export function getMainMenu() {
     return [
         createSubmenu('Browse Patches', () => getPatchBanksMenu()),
+        createSubmenu('Jump to Expansion', () => getJumpExpansionMenu()),
+        createSubmenu('User Patches', () => getUserPatchesMenu()),
         createSubmenu('Browse Performances', () => getPerformancesMenu()),
         createSubmenu('Edit Current', () => getEditMenu()),
         createBack()
     ];
+}
+
+/* === User Patches Menu === */
+function getUserPatchesMenu() {
+    const items = [];
+
+    /* Get list of saved user patches */
+    const listJson = host_module_get_param('user_patch_list');
+    if (listJson) {
+        try {
+            const patches = JSON.parse(listJson);
+            if (patches.length === 0) {
+                items.push(createAction('(No saved patches)', () => {}));
+            } else {
+                for (const patch of patches) {
+                    items.push(createAction(`${patch.index + 1}: ${patch.name}`, () => {
+                        host_module_set_param('load_user_patch', String(patch.index));
+                    }));
+                }
+            }
+        } catch (e) {
+            items.push(createAction('(Error loading list)', () => {}));
+        }
+    } else {
+        items.push(createAction('(No saved patches)', () => {}));
+    }
+
+    items.push(createBack());
+    return items;
+}
+
+/* === Jump to Expansion Menu === */
+function getJumpExpansionMenu() {
+    const items = [];
+
+    /* Internal patches option */
+    items.push(createAction('Internal (Preset A/B)', () => {
+        host_module_set_param('jump_to_internal', '1');
+    }));
+
+    /* Get expansion list from DSP */
+    const expansionListJson = host_module_get_param('expansion_list');
+    if (expansionListJson) {
+        try {
+            const expansions = JSON.parse(expansionListJson);
+            for (const exp of expansions) {
+                items.push(createAction(`${exp.name} (${exp.patch_count})`, () => {
+                    host_module_set_param('jump_to_expansion', String(exp.index));
+                }));
+            }
+        } catch (e) {
+            /* Parse error - show nothing extra */
+        }
+    }
+
+    items.push(createBack());
+    return items;
 }
 
 /* === Patch Browsing === */
@@ -122,9 +181,28 @@ function getEditPatchMenu() {
         createSubmenu('Tone 3', () => getToneMenu(2)),
         createSubmenu('Tone 4', () => getToneMenu(3)),
         createSubmenu('Effects', () => getPatchFxMenu()),
+        createSubmenu('Save Patch', () => getSavePatchMenu()),
         createSubmenu('Settings', () => getSettingsMenu()),
         createBack()
     ];
+}
+
+/* === Save Patch Menu === */
+function getSavePatchMenu() {
+    const items = [];
+
+    for (let i = 0; i < 64; i++) {
+        const slotName = host_module_get_param(`user_patch_${i}_name`) || '(empty)';
+        items.push(
+            createAction(`${i + 1}: ${slotName}`, () => {
+                host_module_set_param(`write_patch_${i}`, '1');
+                host_module_set_param('save_nvram', '1');
+            })
+        );
+    }
+
+    items.push(createBack());
+    return items;
 }
 
 function getEditPerformanceMenu() {
