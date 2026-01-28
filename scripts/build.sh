@@ -45,7 +45,7 @@ echo "Cross prefix: $CROSS_PREFIX"
 
 # Create build directories
 mkdir -p build
-mkdir -p dist/minijv/roms
+mkdir -p dist/minijv/roms/expansions
 
 # Compile DSP plugin (with aggressive optimizations for CM4)
 echo "Compiling DSP plugin..."
