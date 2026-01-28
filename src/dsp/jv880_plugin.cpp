@@ -487,8 +487,9 @@ static volatile int g_thread_running = 0;
 static pthread_t g_load_thread;
 static volatile int g_load_thread_running = 0;
 
-/* Audio ring buffer (44.1kHz stereo output) */
-#define AUDIO_RING_SIZE 192
+/* Audio ring buffer (48kHz stereo output)
+ * 512 samples = ~10.7ms buffer for CPU scheduling headroom */
+#define AUDIO_RING_SIZE 512
 static int16_t g_audio_ring[AUDIO_RING_SIZE * 2];
 static volatile int g_ring_write = 0;
 static volatile int g_ring_read = 0;
@@ -3821,6 +3822,10 @@ static void* v2_emu_thread_func(void *arg) {
         inst->mcu->updateSC55(64);
         int avail = inst->mcu->sample_write_ptr;
 
+        /* Local buffer to batch resampled output (reduces mutex contention) */
+        int16_t local_buf[128 * 2];  /* Max ~46 samples per updateSC55(64) */
+        int local_count = 0;
+
         /* Process all input samples through anti-aliasing filter */
         for (int i = 0; i < avail; i += 2) {
             double in_l = (double)inst->mcu->sample_buffer[i];
@@ -3834,7 +3839,7 @@ static void* v2_emu_thread_func(void *arg) {
             curr_r = filt_r;
             resample_pos += 1.0;
 
-            while (resample_pos >= step && v2_ring_free(inst) > 0) {
+            while (resample_pos >= step && local_count < 128) {
                 resample_pos -= step;
 
                 double t = 1.0 - (resample_pos / 1.0);
@@ -3844,13 +3849,24 @@ static void* v2_emu_thread_func(void *arg) {
                 int32_t out_l = (int32_t)(prev_l + t * (curr_l - prev_l));
                 int32_t out_r = (int32_t)(prev_r + t * (curr_r - prev_r));
 
-                pthread_mutex_lock(&inst->ring_mutex);
-                int wr = inst->ring_write;
-                inst->audio_ring[wr * 2 + 0] = out_l;
-                inst->audio_ring[wr * 2 + 1] = out_r;
-                inst->ring_write = (wr + 1) % AUDIO_RING_SIZE;
-                pthread_mutex_unlock(&inst->ring_mutex);
+                local_buf[local_count * 2 + 0] = out_l;
+                local_buf[local_count * 2 + 1] = out_r;
+                local_count++;
             }
+        }
+
+        /* Batch copy to ring buffer with single lock */
+        if (local_count > 0) {
+            pthread_mutex_lock(&inst->ring_mutex);
+            int free_now = v2_ring_free(inst);
+            int to_write = (local_count < free_now) ? local_count : free_now;
+            for (int i = 0; i < to_write; i++) {
+                int wr = inst->ring_write;
+                inst->audio_ring[wr * 2 + 0] = local_buf[i * 2 + 0];
+                inst->audio_ring[wr * 2 + 1] = local_buf[i * 2 + 1];
+                inst->ring_write = (wr + 1) % AUDIO_RING_SIZE;
+            }
+            pthread_mutex_unlock(&inst->ring_mutex);
         }
     }
 
