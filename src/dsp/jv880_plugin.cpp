@@ -2840,7 +2840,7 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
 }
 
 /* Output gain (reduce to prevent clipping) */
-#define OUTPUT_GAIN_SHIFT 0  /* No attenuation (0dB) */
+#define OUTPUT_GAIN_SHIFT 1  /* -6dB headroom to prevent clipping on hot patches */
 
 static void jv880_render_block(int16_t *out, int frames) {
     if (!g_initialized || !g_thread_running) {
@@ -2997,6 +2997,11 @@ typedef struct {
 
     /* Error state */
     char load_error[256];
+
+    /* Audio diagnostics */
+    int underrun_count;
+    int render_count;
+    int min_buffer_level;
 } jv880_instance_t;
 
 /* Forward declarations for v2 helper functions */
@@ -3297,13 +3302,16 @@ static void v2_send_all_notes_off(jv880_instance_t *inst) {
 /* v2: Load expansion to emulator */
 static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index) {
     if (exp_index < 0 || exp_index >= inst->expansion_count) return;
-    if (exp_index == inst->current_expansion) return;
 
     ExpansionInfo *exp = &inst->expansions[exp_index];
 
+    /* Load expansion data if not already in memory */
     if (!exp->unscrambled) {
         if (!v2_load_expansion_data(inst, exp_index)) return;
     }
+
+    /* Skip if this expansion is already loaded in the emulator */
+    if (exp_index == inst->current_expansion) return;
 
     v2_send_all_notes_off(inst);
     memset(inst->mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
@@ -3311,7 +3319,8 @@ static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index)
 
     inst->current_expansion = exp_index;
     inst->mcu->SC55_Reset();
-    fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator\n", exp->name);
+    inst->warmup_remaining = 50000;  /* Warmup after expansion change */
+    fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator, starting warmup\n", exp->name);
 }
 
 /* v2: Select a patch */
@@ -4208,13 +4217,10 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (json_get_number(val, "mode", &f) == 0) {
             v2_set_mode(inst, (int)f);
         }
-        /* Restore expansion card selection (for performance mode) */
-        if (json_get_number(val, "expansion_index", &f) == 0) {
-            int exp_idx = (int)f;
-            if (exp_idx >= -1 && exp_idx < inst->expansion_count) {
-                inst->current_expansion = exp_idx;
-            }
-        }
+        /* Note: expansion_index is saved for state but we don't restore it directly.
+         * v2_select_patch will load the correct expansion when it selects the patch.
+         * Setting current_expansion here would cause v2_load_expansion_to_emulator
+         * to skip loading the actual ROM data. */
         if (json_get_number(val, "expansion_bank_offset", &f) == 0) {
             inst->expansion_bank_offset = (int)f;
         }
@@ -4706,6 +4712,12 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "loading_status") == 0) {
         return snprintf(buf, buf_len, "%s", inst->loading_status);
     }
+    if (strcmp(key, "audio_diag") == 0) {
+        int avail = v2_ring_available(inst);
+        return snprintf(buf, buf_len, "underruns=%d renders=%d ring=%d/%d min=%d",
+                inst->underrun_count, inst->render_count, avail, AUDIO_RING_SIZE,
+                inst->min_buffer_level);
+    }
     if (strcmp(key, "polyphony") == 0) {
         return snprintf(buf, buf_len, "28");
     }
@@ -5158,7 +5170,7 @@ static int v2_get_error(void *instance, char *buf, int buf_len) {
 /* v2: Render block */
 static void v2_render_block(void *instance, int16_t *out, int frames) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
-    if (!inst || !inst->initialized || !inst->thread_running) {
+    if (!inst || !inst->initialized || !inst->thread_running || !inst->loading_complete) {
         memset(out, 0, frames * 2 * sizeof(int16_t));
         return;
     }
@@ -5166,6 +5178,12 @@ static void v2_render_block(void *instance, int16_t *out, int frames) {
     pthread_mutex_lock(&inst->ring_mutex);
     int avail = v2_ring_available(inst);
     int to_read = (avail < frames) ? avail : frames;
+
+    /* Track buffer levels for diagnostics */
+    inst->render_count++;
+    if (avail < inst->min_buffer_level || inst->min_buffer_level == 0) {
+        inst->min_buffer_level = avail;
+    }
 
     for (int i = 0; i < to_read; i++) {
         out[i * 2 + 0] = inst->audio_ring[inst->ring_read * 2 + 0] >> OUTPUT_GAIN_SHIFT;
@@ -5175,6 +5193,12 @@ static void v2_render_block(void *instance, int16_t *out, int frames) {
     pthread_mutex_unlock(&inst->ring_mutex);
 
     /* Pad with silence if underrun */
+    if (to_read < frames) {
+        inst->underrun_count++;
+        fprintf(stderr, "JV880: UNDERRUN #%d: needed %d, had %d (min_level=%d, renders=%d)\n",
+                inst->underrun_count, frames, avail, inst->min_buffer_level, inst->render_count);
+        inst->min_buffer_level = 9999;  /* Reset for next period */
+    }
     for (int i = to_read; i < frames; i++) {
         out[i * 2 + 0] = 0;
         out[i * 2 + 1] = 0;
