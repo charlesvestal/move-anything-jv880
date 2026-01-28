@@ -69,8 +69,8 @@ function getUserPatchesMenu() {
 function getJumpExpansionMenu() {
     const items = [];
 
-    /* Internal patches option */
-    items.push(createAction('Internal (Preset A/B)', () => {
+    /* Factory patches option - jumps to start of list (Preset A) */
+    items.push(createAction('Factory (Preset A)', () => {
         host_module_set_param('jump_to_internal', '1');
     }));
 

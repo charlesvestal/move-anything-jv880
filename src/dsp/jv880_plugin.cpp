@@ -4030,8 +4030,13 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
     } else if (strcmp(key, "jump_to_expansion") == 0) {
         /* Jump to first patch of expansion (for patch browsing) */
+        /* -1 = factory patches, 0+ = expansion index */
         int exp_idx = atoi(val);
-        if (exp_idx >= 0 && exp_idx < inst->expansion_count) {
+        if (exp_idx == -1) {
+            /* Jump to factory patches (Preset A) */
+            v2_select_patch(inst, 0);
+            fprintf(stderr, "JV880 v2: Jumped to factory patches\n");
+        } else if (exp_idx >= 0 && exp_idx < inst->expansion_count) {
             int first_patch = inst->expansions[exp_idx].first_global_index;
             if (first_patch >= 0 && first_patch < inst->total_patches) {
                 v2_select_patch(inst, first_patch);
@@ -4364,9 +4369,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     /* Expansion list for "Choose Expansion" menu - returns JSON array */
     if (strcmp(key, "expansion_list") == 0) {
-        int written = snprintf(buf, buf_len, "[");
+        /* Include factory patches as first entry with index -1 */
+        int written = snprintf(buf, buf_len, "[{\"index\":-1,\"name\":\"Factory (Preset A)\",\"first_patch\":0,\"patch_count\":128}");
         for (int i = 0; i < inst->expansion_count && written < buf_len - 100; i++) {
-            if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
+            written += snprintf(buf + written, buf_len - written, ",");
             written += snprintf(buf + written, buf_len - written,
                 "{\"index\":%d,\"name\":\"%s\",\"first_patch\":%d,\"patch_count\":%d}",
                 i, inst->expansions[i].name, inst->expansions[i].first_global_index,
@@ -4571,7 +4577,19 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_count\":4,"
                     "\"child_label\":\"Tone\","
                     "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
-                    "\"params\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_reverbtime\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_chorusdepth\",\"nvram_patchCommon_chorusrate\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"]"
+                    "\"params\":["
+                        "{\"key\":\"nvram_patchCommon_patchlevel\",\"label\":\"Patch Level\"},"
+                        "{\"key\":\"nvram_patchCommon_patchpan\",\"label\":\"Patch Pan\"},"
+                        "{\"key\":\"nvram_patchCommon_reverblevel\",\"label\":\"Reverb Level\"},"
+                        "{\"key\":\"nvram_patchCommon_reverbtime\",\"label\":\"Reverb Time\"},"
+                        "{\"key\":\"nvram_patchCommon_choruslevel\",\"label\":\"Chorus Level\"},"
+                        "{\"key\":\"nvram_patchCommon_chorusdepth\",\"label\":\"Chorus Depth\"},"
+                        "{\"key\":\"nvram_patchCommon_chorusrate\",\"label\":\"Chorus Rate\"},"
+                        "{\"key\":\"nvram_patchCommon_analogfeel\",\"label\":\"Analog Feel\"},"
+                        "{\"key\":\"octave_transpose\",\"label\":\"Octave\"},"
+                        "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"},"
+                        "{\"level\":\"user_patches\",\"label\":\"User Patches\"}"
+                    "]"
                 "},"
                 "\"tones\":{"
                     "\"children\":null,"
@@ -4594,6 +4612,22 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_prefix\":\"sram_part_\","
                     "\"knobs\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\"],"
                     "\"params\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"patchnumber\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
+                "},"
+                "\"expansions\":{"
+                    "\"label\":\"Jump to Expansion\","
+                    "\"items_param\":\"expansion_list\","
+                    "\"select_param\":\"jump_to_expansion\","
+                    "\"children\":null,"
+                    "\"knobs\":[],"
+                    "\"params\":[]"
+                "},"
+                "\"user_patches\":{"
+                    "\"label\":\"User Patches\","
+                    "\"items_param\":\"user_patch_list\","
+                    "\"select_param\":\"load_user_patch\","
+                    "\"children\":null,"
+                    "\"knobs\":[],"
+                    "\"params\":[]"
                 "}"
             "}"
         "}";
