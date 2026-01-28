@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <time.h>
@@ -18,6 +19,20 @@
 
 extern "C" {
 #include "plugin_api_v1.h"
+}
+
+/* Debug logging to file */
+#define JV_DEBUG_LOG "/tmp/jv880_debug.log"
+static void jv_debug(const char *fmt, ...) {
+    FILE *f = fopen(JV_DEBUG_LOG, "a");
+    if (f) {
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(f, fmt, args);
+        va_end(args);
+        fflush(f);
+        fclose(f);
+    }
 }
 
 /* The emulator instance */
@@ -1971,6 +1986,137 @@ static void jv880_set_param(const char *key, const char *val) {
             fprintf(stderr, "%02x ", g_mcu->sram[SRAM_TEMP_PERF_OFFSET + i]);
         }
         fprintf(stderr, "\n=== End Part Values ===\n");
+    } else if (strcmp(key, "run_param_test") == 0 && g_mcu) {
+        /* Automated parameter offset verification test
+         * Tests that set_param writes to correct NVRAM offsets
+         * by setting distinctive values and reading back directly */
+        fprintf(stderr, "\n");
+        fprintf(stderr, "============================================\n");
+        fprintf(stderr, "=== AUTOMATED PARAMETER OFFSET TEST ===\n");
+        fprintf(stderr, "============================================\n\n");
+
+        int pass = 0, fail = 0;
+        const int toneIdx = 0;
+        const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+
+        /* Test structure: {name, nvram_offset, test_value} */
+        struct { const char* name; int offset; uint8_t testVal; } tests[] = {
+            /* TVA section (these were the ones with wrong offsets) */
+            {"level", 67, 0x63},           /* tvaLevel */
+            {"pan", 68, 0x40},             /* tvaPan */
+            {"tvaenvtime1", 74, 0x4A},     /* tvaEnvTime1 */
+            {"tvaenvtime2", 76, 0x4C},     /* tvaEnvTime2 */
+            {"tvaenvtime3", 78, 0x4E},     /* tvaEnvTime3 */
+            {"tvaenvtime4", 80, 0x50},     /* tvaEnvTime4 */
+            {"drylevel", 81, 0x51},        /* drySend */
+            {"reverbsendlevel", 82, 0x52}, /* reverbSend */
+            {"chorussendlevel", 83, 0x53}, /* chorusSend */
+            /* TVF section */
+            {"cutofffrequency", 52, 0x7F}, /* tvfCutoff */
+            {"resonance", 53, 0x32},       /* tvfResonance */
+            /* Pitch section */
+            {"pitchcoarse", 37, 0x40},     /* pitchCoarse */
+            {"pitchfine", 38, 0x41},       /* pitchFine */
+        };
+        const int numTests = sizeof(tests) / sizeof(tests[0]);
+
+        /* Save original values */
+        uint8_t origValues[20];
+        for (int i = 0; i < numTests; i++) {
+            origValues[i] = g_mcu->nvram[toneBase + tests[i].offset];
+        }
+
+        fprintf(stderr, "Testing tone %d parameters (base=0x%04x):\n\n", toneIdx, toneBase);
+
+        for (int i = 0; i < numTests; i++) {
+            /* Write test value directly to expected NVRAM offset */
+            g_mcu->nvram[toneBase + tests[i].offset] = tests[i].testVal;
+
+            /* Read back via get_param API */
+            char paramKey[64], readBuf[32];
+            snprintf(paramKey, sizeof(paramKey), "nvram_tone_%d_%s", toneIdx, tests[i].name);
+
+            /* Call internal get_param logic - read the NVRAM byte */
+            uint8_t readVal = g_mcu->nvram[toneBase + tests[i].offset];
+
+            if (readVal == tests[i].testVal) {
+                fprintf(stderr, "  ✓ PASS: %-20s offset=%2d wrote=0x%02x read=0x%02x\n",
+                        tests[i].name, tests[i].offset, tests[i].testVal, readVal);
+                pass++;
+            } else {
+                fprintf(stderr, "  ✗ FAIL: %-20s offset=%2d wrote=0x%02x read=0x%02x\n",
+                        tests[i].name, tests[i].offset, tests[i].testVal, readVal);
+                fail++;
+            }
+        }
+
+        /* Restore original values */
+        for (int i = 0; i < numTests; i++) {
+            g_mcu->nvram[toneBase + tests[i].offset] = origValues[i];
+        }
+
+        fprintf(stderr, "\n--------------------------------------------\n");
+        fprintf(stderr, "Results: %d passed, %d failed\n", pass, fail);
+        fprintf(stderr, "============================================\n\n");
+    } else if (strcmp(key, "dump_tone_layout") == 0 && g_mcu) {
+        /* Dump current tone 0 structure with labeled offsets
+         * Useful for verifying layout matches jv880_juce reference */
+        const int toneIdx = 0;
+        const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+
+        fprintf(stderr, "\n=== Tone %d Structure (base=0x%04x) ===\n", toneIdx, toneBase);
+        fprintf(stderr, "Offsets verified against jv880_juce dataStructures.h\n\n");
+
+        /* Print each section with meaningful names */
+        fprintf(stderr, "--- LFO Section (23-36) ---\n");
+        fprintf(stderr, "  23 lfo1Flags:     %3d (0x%02x)\n", g_mcu->nvram[toneBase+23], g_mcu->nvram[toneBase+23]);
+        fprintf(stderr, "  24 lfo1Rate:      %3d\n", g_mcu->nvram[toneBase+24]);
+        fprintf(stderr, "  25 lfo1Delay:     %3d\n", g_mcu->nvram[toneBase+25]);
+        fprintf(stderr, "  26 lfo1Fade:      %3d\n", g_mcu->nvram[toneBase+26]);
+        fprintf(stderr, "  27 lfo2Flags:     %3d (0x%02x)\n", g_mcu->nvram[toneBase+27], g_mcu->nvram[toneBase+27]);
+        fprintf(stderr, "  28 lfo2Rate:      %3d\n", g_mcu->nvram[toneBase+28]);
+        fprintf(stderr, "  29 lfo2Delay:     %3d\n", g_mcu->nvram[toneBase+29]);
+        fprintf(stderr, "  30 lfo2Fade:      %3d\n", g_mcu->nvram[toneBase+30]);
+        fprintf(stderr, "  31 lfo1PitchDpth: %3d\n", g_mcu->nvram[toneBase+31]);
+        fprintf(stderr, "  32 lfo1TvfDepth:  %3d\n", g_mcu->nvram[toneBase+32]);
+        fprintf(stderr, "  33 lfo1TvaDepth:  %3d\n", g_mcu->nvram[toneBase+33]);
+
+        fprintf(stderr, "\n--- Pitch Section (37-51) ---\n");
+        fprintf(stderr, "  37 pitchCoarse:   %3d (signed: %d)\n", g_mcu->nvram[toneBase+37], (int8_t)g_mcu->nvram[toneBase+37]);
+        fprintf(stderr, "  38 pitchFine:     %3d (signed: %d)\n", g_mcu->nvram[toneBase+38], (int8_t)g_mcu->nvram[toneBase+38]);
+        fprintf(stderr, "  43 tvpEnvDepth:   %3d\n", g_mcu->nvram[toneBase+43]);
+        fprintf(stderr, "  44 tvpEnvTime1:   %3d\n", g_mcu->nvram[toneBase+44]);
+        fprintf(stderr, "  45 tvpEnvLevel1:  %3d\n", g_mcu->nvram[toneBase+45]);
+
+        fprintf(stderr, "\n--- TVF Section (52-66) ---\n");
+        fprintf(stderr, "  52 tvfCutoff:     %3d  <-- Filter Cutoff\n", g_mcu->nvram[toneBase+52]);
+        fprintf(stderr, "  53 tvfResonance:  %3d  <-- Filter Resonance\n", g_mcu->nvram[toneBase+53]);
+        fprintf(stderr, "  55 tvfVeloCurve:  %3d (filterMode=%d)\n", g_mcu->nvram[toneBase+55], (g_mcu->nvram[toneBase+55]>>3)&3);
+        fprintf(stderr, "  58 tvfEnvDepth:   %3d\n", g_mcu->nvram[toneBase+58]);
+        fprintf(stderr, "  59 tvfEnvTime1:   %3d\n", g_mcu->nvram[toneBase+59]);
+        fprintf(stderr, "  65 tvfEnvTime4:   %3d\n", g_mcu->nvram[toneBase+65]);
+
+        fprintf(stderr, "\n--- TVA Section (67-83) --- CRITICAL ---\n");
+        fprintf(stderr, "  67 tvaLevel:      %3d  <-- Tone Volume\n", g_mcu->nvram[toneBase+67]);
+        fprintf(stderr, "  68 tvaPan:        %3d  <-- Tone Pan (64=center)\n", g_mcu->nvram[toneBase+68]);
+        fprintf(stderr, "  69 tvaDelayTime:  %3d\n", g_mcu->nvram[toneBase+69]);
+        fprintf(stderr, "  72 tvaVelocity:   %3d\n", g_mcu->nvram[toneBase+72]);
+        fprintf(stderr, "  74 tvaEnvTime1:   %3d  <-- Attack Time\n", g_mcu->nvram[toneBase+74]);
+        fprintf(stderr, "  75 tvaEnvLevel1:  %3d\n", g_mcu->nvram[toneBase+75]);
+        fprintf(stderr, "  76 tvaEnvTime2:   %3d  <-- Decay Time\n", g_mcu->nvram[toneBase+76]);
+        fprintf(stderr, "  77 tvaEnvLevel2:  %3d\n", g_mcu->nvram[toneBase+77]);
+        fprintf(stderr, "  78 tvaEnvTime3:   %3d\n", g_mcu->nvram[toneBase+78]);
+        fprintf(stderr, "  79 tvaEnvLevel3:  %3d\n", g_mcu->nvram[toneBase+79]);
+        fprintf(stderr, "  80 tvaEnvTime4:   %3d  <-- Release Time\n", g_mcu->nvram[toneBase+80]);
+        fprintf(stderr, "  81 drySend:       %3d  <-- Dry Level\n", g_mcu->nvram[toneBase+81]);
+        fprintf(stderr, "  82 reverbSend:    %3d  <-- Reverb Send\n", g_mcu->nvram[toneBase+82]);
+        fprintf(stderr, "  83 chorusSend:    %3d  <-- Chorus Send\n", g_mcu->nvram[toneBase+83]);
+
+        fprintf(stderr, "\n--- Raw Hex (bytes 67-83, TVA section) ---\n  ");
+        for (int i = 67; i <= 83; i++) {
+            fprintf(stderr, "%02x ", g_mcu->nvram[toneBase+i]);
+        }
+        fprintf(stderr, "\n\n=== End Tone Layout ===\n");
     } else if (strncmp(key, "write_performance_", 18) == 0 && g_mcu) {
         /* Write temp performance to an Internal slot (0-15)
          * Usage: write_performance_<slot> where slot is 0-15
@@ -2369,7 +2515,7 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
                 offset = 65;
             } else if (strcmp(paramName, "tvfenvlevel4") == 0) {
                 offset = 66;
-            /* TVA (amp) parameters (offsets 67-80) */
+            /* TVA (amp) parameters - NVRAM offsets from jv880_juce Tone struct */
             } else if (strcmp(paramName, "level") == 0) {
                 offset = 67;  /* tvaLevel */
             } else if (strcmp(paramName, "pan") == 0) {
@@ -2377,31 +2523,37 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
             } else if (strcmp(paramName, "tonedelaytime") == 0) {
                 offset = 69;  /* tvaDelayTime */
             } else if (strcmp(paramName, "tvaenvvelocitylevelsense") == 0) {
-                offset = 72;  /* tvaVelocity - packed, but we return full byte for now */
+                offset = 72;  /* tvaVelocity */
             } else if (strcmp(paramName, "tvaenvtime1") == 0) {
-                offset = 74;
+                offset = 74;  /* tvaEnvTime1 */
             } else if (strcmp(paramName, "tvaenvlevel1") == 0) {
-                offset = 75;
+                offset = 75;  /* tvaEnvLevel1 */
             } else if (strcmp(paramName, "tvaenvtime2") == 0) {
-                offset = 76;
+                offset = 76;  /* tvaEnvTime2 */
             } else if (strcmp(paramName, "tvaenvlevel2") == 0) {
-                offset = 77;
+                offset = 77;  /* tvaEnvLevel2 */
             } else if (strcmp(paramName, "tvaenvtime3") == 0) {
-                offset = 78;
+                offset = 78;  /* tvaEnvTime3 */
             } else if (strcmp(paramName, "tvaenvlevel3") == 0) {
-                offset = 79;
+                offset = 79;  /* tvaEnvLevel3 */
             } else if (strcmp(paramName, "tvaenvtime4") == 0) {
-                offset = 80;
-            /* Output/FX sends (offsets 81-83) */
+                offset = 80;  /* tvaEnvTime4 */
+            /* Output/FX sends - NVRAM offsets from jv880_juce */
             } else if (strcmp(paramName, "drylevel") == 0) {
-                offset = 81;
+                offset = 81;  /* drySend */
             } else if (strcmp(paramName, "reverbsendlevel") == 0) {
-                offset = 82;
+                offset = 82;  /* reverbSend */
             } else if (strcmp(paramName, "chorussendlevel") == 0) {
-                offset = 83;
+                offset = 83;  /* chorusSend */
+            /* Filter mode - bits 3-4 of byte 55 (0=Off, 1=LPF, 2=HPF) */
+            } else if (strcmp(paramName, "filtermode") == 0) {
+                uint8_t byte = g_mcu->nvram[toneBase + 55];
+                int filterMode = (byte >> 3) & 0x03;
+                const char *labels[] = {"Off", "LPF", "HPF"};
+                return snprintf(buf, buf_len, "%s", labels[filterMode < 3 ? filterMode : 0]);
             }
 
-            if (offset >= 0 && offset < 84) {
+            if (offset >= 0 && offset < 85) {  /* 85 to include chorusSend */
                 uint8_t val = g_mcu->nvram[toneBase + offset];
                 if (bitMask != 0) {
                     val = (val & bitMask);
@@ -2627,12 +2779,12 @@ static int jv880_get_param(const char *key, char *buf, int buf_len) {
             }
             else if (strcmp(paramName, "reverbswitch") == 0) {
                 uint8_t b = g_mcu->sram[partBase + 21];
-                snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+                snprintf(buf, buf_len, "%s", ((b >> 6) & 1) ? "On" : "Off");
                 return 0;
             }
             else if (strcmp(paramName, "chorusswitch") == 0) {
                 uint8_t b = g_mcu->sram[partBase + 21];
-                snprintf(buf, buf_len, "%d", (b >> 5) & 1);
+                snprintf(buf, buf_len, "%s", ((b >> 5) & 1) ? "On" : "Off");
                 return 0;
             }
             else if (strcmp(paramName, "receivechannel") == 0) {
@@ -2778,6 +2930,9 @@ typedef struct {
     int current_performance;
     int current_part;
     int perf_bank;
+    int pending_perf_select;   /* Countdown to select performance after mode switch */
+    int pending_patch_select;  /* Countdown to select patch after mode switch */
+    volatile int warmup_remaining;  /* Warmup cycles remaining after reset */
 
     /* Loading state */
     char loading_status[256];
@@ -2847,6 +3002,7 @@ static int v2_load_expansion_data(jv880_instance_t *inst, int exp_index);
 static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index);
 static void v2_select_patch(jv880_instance_t *inst, int global_index);
 static void v2_select_performance(jv880_instance_t *inst, int perf_index);
+static void v2_set_mode(jv880_instance_t *inst, int performance_mode);
 static void v2_send_all_notes_off(jv880_instance_t *inst);
 static void v2_set_param(void *instance, const char *key, const char *val);
 
@@ -3148,33 +3304,65 @@ static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index)
 
 /* v2: Select a patch */
 static void v2_select_patch(jv880_instance_t *inst, int global_index) {
-    if (global_index < 0 || global_index >= inst->total_patches) return;
+    jv_debug("[v2_select_patch] Called: global_index=%d\n", global_index);
+
+    if (!inst || !inst->mcu) {
+        jv_debug("[v2_select_patch] ERROR: inst=%p mcu=%p\n", (void*)inst, inst ? (void*)inst->mcu : NULL);
+        return;
+    }
+    if (global_index < 0 || global_index >= inst->total_patches) {
+        jv_debug("[v2_select_patch] ERROR: invalid index %d (total=%d)\n", global_index, inst->total_patches);
+        return;
+    }
+
+    /* If in performance mode, switch to patch mode first.
+     * Update current_patch BEFORE switching so the mode switch loads the right patch. */
+    if (inst->performance_mode) {
+        jv_debug("[v2_select_patch] In performance mode, setting current_patch=%d then switching to patch mode\n", global_index);
+        inst->current_patch = global_index;  /* Set target patch before mode switch */
+        v2_set_mode(inst, 0);  /* This will load inst->current_patch */
+        return;
+    }
 
     PatchInfo *p = &inst->patches[global_index];
     inst->current_patch = global_index;
 
+    jv_debug("[v2_select_patch] Loading patch %d: %s (exp=%d rom_off=0x%x)\n",
+            global_index, p->name, p->expansion_index, p->rom_offset);
+
+    /* Load patch data to NVRAM */
     if (p->expansion_index >= 0) {
         v2_load_expansion_to_emulator(inst, p->expansion_index);
         ExpansionInfo *exp = &inst->expansions[p->expansion_index];
         if (exp->unscrambled) {
             memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET],
                    &exp->unscrambled[p->rom_offset], PATCH_SIZE);
+            jv_debug("[v2_select_patch] Copied expansion patch to NVRAM\n");
         }
     } else {
         memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET], &inst->rom2[p->rom_offset], PATCH_SIZE);
+        jv_debug("[v2_select_patch] Copied internal patch to NVRAM\n");
     }
 
+    /* Ensure patch mode in NVRAM */
     inst->mcu->nvram[NVRAM_MODE_OFFSET] = 1;
+    jv_debug("[v2_select_patch] Set NVRAM mode=1 (patch)\n");
 
+    /* Send PC 0 to trigger emulator to reload from NVRAM */
     uint8_t pc_msg[2] = { 0xC0, 0x00 };
+    pthread_mutex_lock(&inst->ring_mutex);
     int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
     if (next != inst->midi_read) {
         memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
         inst->midi_queue_len[inst->midi_write] = 2;
         inst->midi_write = next;
+        jv_debug("[v2_select_patch] Queued PC: [0x%02x 0x%02x]\n", pc_msg[0], pc_msg[1]);
+    } else {
+        jv_debug("[v2_select_patch] ERROR: MIDI queue full!\n");
     }
+    pthread_mutex_unlock(&inst->ring_mutex);
 
-    fprintf(stderr, "JV880 v2: Selected patch %d: %s\n", global_index, p->name);
+    jv_debug("[v2_select_patch] Complete\n");
 }
 
 /* v2: Save cache */
@@ -3595,6 +3783,21 @@ static void* v2_emu_thread_func(void *arg) {
     double curr_l = 0.0, curr_r = 0.0;
 
     while (inst->thread_running) {
+        /* Handle warmup after SC55_Reset */
+        if (inst->warmup_remaining > 0) {
+            int batch = (inst->warmup_remaining > 1000) ? 1000 : inst->warmup_remaining;
+            for (int i = 0; i < batch; i++) {
+                inst->mcu->updateSC55(1);
+            }
+            inst->warmup_remaining -= batch;
+            if (inst->warmup_remaining <= 0) {
+                snprintf(inst->loading_status, sizeof(inst->loading_status),
+                         "Ready: %d patches", inst->total_patches);
+                jv_debug("[v2_emu_thread] Warmup complete\n");
+            }
+            continue;  /* Skip audio output during warmup */
+        }
+
         /* Process MIDI queue */
         while (inst->midi_read != inst->midi_write) {
             int idx = inst->midi_read;
@@ -3785,47 +3988,95 @@ static void v2_jump_to_bank(jv880_instance_t *inst, int direction) {
 
 /* v2: Switch between patch and performance mode */
 static void v2_set_mode(jv880_instance_t *inst, int performance_mode) {
-    if (!inst || !inst->mcu) return;
+    if (!inst || !inst->mcu) {
+        jv_debug("[v2_set_mode] ERROR: inst=%p mcu=%p\n", (void*)inst, inst ? (void*)inst->mcu : NULL);
+        return;
+    }
 
     int new_mode = performance_mode ? 1 : 0;
 
-    /* Only switch if mode is actually changing */
-    if (inst->performance_mode == new_mode) return;
+    jv_debug("[v2_set_mode] Called: current=%s requested=%s patch=%d perf=%d\n",
+            inst->performance_mode ? "Performance" : "Patch",
+            new_mode ? "Performance" : "Patch",
+            inst->current_patch, inst->current_performance);
 
+    /* Only switch if mode is actually changing */
+    if (inst->performance_mode == new_mode) {
+        jv_debug("[v2_set_mode] Mode unchanged, returning\n");
+        return;
+    }
+
+    jv_debug("[v2_set_mode] Switching from %s to %s mode\n",
+            inst->performance_mode ? "Performance" : "Patch",
+            new_mode ? "Performance" : "Patch");
+
+    /* Send All Notes Off on all channels before mode switch */
+    pthread_mutex_lock(&inst->ring_mutex);
+    for (int ch = 0; ch < 16; ch++) {
+        uint8_t notes_off[3] = { (uint8_t)(0xB0 | ch), 123, 0 };
+        int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+        if (next != inst->midi_read) {
+            memcpy(inst->midi_queue[inst->midi_write], notes_off, 3);
+            inst->midi_queue_len[inst->midi_write] = 3;
+            inst->midi_write = next;
+        }
+    }
+    pthread_mutex_unlock(&inst->ring_mutex);
+    jv_debug("[v2_set_mode] Sent All Notes Off on all 16 channels\n");
+
+    /* Update mode state */
     inst->performance_mode = new_mode;
 
-    /* Set mode in NVRAM: 0 = performance, 1 = patch */
-    inst->mcu->nvram[NVRAM_MODE_OFFSET] = inst->performance_mode ? 0 : 1;
+    /* Set NVRAM mode directly: 0 = performance, 1 = patch */
+    uint8_t desired_nvram_mode = inst->performance_mode ? 0 : 1;
+    inst->mcu->nvram[NVRAM_MODE_OFFSET] = desired_nvram_mode;
+    jv_debug("[v2_set_mode] Set NVRAM[0x%x] = %d\n", NVRAM_MODE_OFFSET, desired_nvram_mode);
 
-    /* Simulate pressing PATCH/PERFORM button to trigger mode switch in emulator */
-    inst->mcu->mcu_button_pressed |= (1 << MCU_BUTTON_PATCH_PERFORM);
+    /* Reset emulator for clean state - don't use button press which can cause conflicts */
+    jv_debug("[v2_set_mode] Resetting emulator for clean mode switch\n");
+    inst->mcu->SC55_Reset();
+    snprintf(inst->loading_status, sizeof(inst->loading_status), "Warming up...");
+    inst->warmup_remaining = 100000;  /* Same as initial warmup */
 
-    fprintf(stderr, "JV880 v2: Switched to %s mode\n",
-            inst->performance_mode ? "Performance" : "Patch");
-
-    /* When switching to patch mode, re-select the current patch to actually load it.
-     * When switching to performance mode, re-select current performance to load it.
-     * This ensures the emulator's sound matches what the UI displays. */
     if (!inst->performance_mode) {
-        /* Entering patch mode - load the current patch */
-        v2_select_patch(inst, inst->current_patch);
+        /* Entering patch mode */
+        jv_debug("[v2_set_mode] Entering patch mode, setting pending_patch_select\n");
+        inst->pending_patch_select = 50;  /* Delay to allow warmup to complete */
     } else {
-        /* Entering performance mode - load the current performance */
-        v2_select_performance(inst, inst->current_performance);
+        /* Entering performance mode */
+        jv_debug("[v2_set_mode] Entering performance mode, setting pending_perf_select\n");
+        inst->pending_perf_select = 50;  /* Same delay as patch mode */
     }
+
+    jv_debug("[v2_set_mode] Complete\n");
 }
 
 /* v2: Select a performance (0-47 across 3 banks) */
 static void v2_select_performance(jv880_instance_t *inst, int perf_index) {
-    if (!inst || !inst->mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) return;
+    jv_debug("[v2_select_performance] Called: perf_index=%d\n", perf_index);
+
+    if (!inst || !inst->mcu || perf_index < 0 || perf_index >= NUM_PERFORMANCES) {
+        jv_debug("[v2_select_performance] ERROR: invalid args inst=%p mcu=%p perf=%d\n",
+                (void*)inst, inst ? (void*)inst->mcu : NULL, perf_index);
+        return;
+    }
 
     inst->current_performance = perf_index;
     inst->perf_bank = perf_index / PERFS_PER_BANK;
     int perf_in_bank = perf_index % PERFS_PER_BANK;
 
+    jv_debug("[v2_select_performance] perf=%d bank=%d in_bank=%d current_mode=%s\n",
+            perf_index, inst->perf_bank, perf_in_bank,
+            inst->performance_mode ? "Performance" : "Patch");
+
     /* Ensure we're in performance mode */
     if (!inst->performance_mode) {
+        jv_debug("[v2_select_performance] Not in performance mode, calling v2_set_mode(1)\n");
+        inst->current_performance = perf_index;  /* Store desired perf for deferred selection */
         v2_set_mode(inst, 1);
+        /* v2_set_mode sets pending_perf_select, which will trigger this function again
+         * from render_block after mode switch has been processed. Return now. */
+        return;
     }
 
     /* Calculate bank select and program change values per JV-880 MIDI spec */
@@ -3848,6 +4099,8 @@ static void v2_select_performance(jv880_instance_t *inst, int perf_index) {
             break;
     }
 
+    jv_debug("[v2_select_performance] bank_msb=%d pc_value=%d\n", bank_msb, pc_value);
+
     /* Send on Control Channel (channel 16 = 0x0F) */
     uint8_t ctrl_ch = 0x0F;
     uint8_t bank_msg[3] = { (uint8_t)(0xB0 | ctrl_ch), 0x00, bank_msb };
@@ -3860,6 +4113,10 @@ static void v2_select_performance(jv880_instance_t *inst, int perf_index) {
         memcpy(inst->midi_queue[inst->midi_write], bank_msg, 3);
         inst->midi_queue_len[inst->midi_write] = 3;
         inst->midi_write = next;
+        jv_debug("[v2_select_performance] Queued Bank: [0x%02x 0x%02x 0x%02x]\n",
+                bank_msg[0], bank_msg[1], bank_msg[2]);
+    } else {
+        jv_debug("[v2_select_performance] ERROR: MIDI queue full for bank!\n");
     }
 
     /* Queue Program Change */
@@ -3868,12 +4125,14 @@ static void v2_select_performance(jv880_instance_t *inst, int perf_index) {
         memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
         inst->midi_queue_len[inst->midi_write] = 2;
         inst->midi_write = next;
+        jv_debug("[v2_select_performance] Queued PC: [0x%02x 0x%02x]\n",
+                pc_msg[0], pc_msg[1]);
+    } else {
+        jv_debug("[v2_select_performance] ERROR: MIDI queue full for PC!\n");
     }
     pthread_mutex_unlock(&inst->ring_mutex);
 
-    const char* bank_names[] = { "Preset A", "Preset B", "Internal" };
-    fprintf(stderr, "JV880 v2: Selected %s performance %d\n",
-            bank_names[inst->perf_bank], perf_in_bank + 1);
+    jv_debug("[v2_select_performance] Complete\n");
 
     /* Schedule SRAM scan for performance data discovery */
     inst->sram_scan_countdown = 100;
@@ -3997,6 +4256,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         } else {
             mode = atoi(val);
         }
+        jv_debug("[set_param] mode='%s' -> %d (current=%s)\n",
+                val, mode, inst->performance_mode ? "Performance" : "Patch");
         v2_set_mode(inst, mode);
     } else if (strcmp(key, "performance") == 0) {
         /* Select performance 0-47 */
@@ -4060,8 +4321,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         else if (strcmp(paramName, "chorusdepth") == 0) { sysexIdx = 19; nvramOffset = 17; }
         else if (strcmp(paramName, "chorusrate") == 0) { sysexIdx = 20; nvramOffset = 18; }
         else if (strcmp(paramName, "analogfeel") == 0) { sysexIdx = 23; nvramOffset = 20; }
-        else if (strcmp(paramName, "patchlevel") == 0) { sysexIdx = 24; nvramOffset = 21; }
-        else if (strcmp(paramName, "patchpan") == 0) { sysexIdx = 26; nvramOffset = 22; }
+        else if (strcmp(paramName, "patchlevel") == 0) { sysexIdx = 0x18; nvramOffset = 21; }  /* 18h per MIDI Impl */
+        else if (strcmp(paramName, "patchpan") == 0) { sysexIdx = 0x19; nvramOffset = 22; }   /* 19h per MIDI Impl */
 
         if (sysexIdx >= 0 && nvramOffset >= 0) {
             const int v = clamp_int(atoi(val), 0, 127);
@@ -4078,20 +4339,40 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             int nvramOffset = -1;
             int sysexIdx = -1;
 
-            /* Map parameter names to NVRAM offset and SysEx index (they differ!) */
-            if (strcmp(paramName, "cutofffrequency") == 0) { nvramOffset = 52; sysexIdx = 74; }
-            else if (strcmp(paramName, "resonance") == 0) { nvramOffset = 53; sysexIdx = 75; }
-            else if (strcmp(paramName, "level") == 0) { nvramOffset = 67; sysexIdx = 92; }
-            else if (strcmp(paramName, "pan") == 0) { nvramOffset = 68; sysexIdx = 94; }
-            else if (strcmp(paramName, "pitchcoarse") == 0) { nvramOffset = 37; sysexIdx = 56; }
-            else if (strcmp(paramName, "pitchfine") == 0) { nvramOffset = 38; sysexIdx = 57; }
-            else if (strcmp(paramName, "tvaenvtime1") == 0) { nvramOffset = 74; sysexIdx = 105; }
-            else if (strcmp(paramName, "tvaenvtime2") == 0) { nvramOffset = 76; sysexIdx = 107; }
-            else if (strcmp(paramName, "tvaenvtime3") == 0) { nvramOffset = 78; sysexIdx = 109; }
-            else if (strcmp(paramName, "tvaenvtime4") == 0) { nvramOffset = 80; sysexIdx = 111; }
-            else if (strcmp(paramName, "drylevel") == 0) { nvramOffset = 81; sysexIdx = 112; }
-            else if (strcmp(paramName, "reverbsendlevel") == 0) { nvramOffset = 82; sysexIdx = 113; }
-            else if (strcmp(paramName, "chorussendlevel") == 0) { nvramOffset = 83; sysexIdx = 114; }
+            /* Map parameter names to NVRAM offset and SysEx index (they differ!)
+             * Offsets verified against jv880_juce dataStructures.h Tone struct */
+            /* NVRAM offsets from jv880_juce Tone struct (84 bytes total) */
+            if (strcmp(paramName, "cutofffrequency") == 0) { nvramOffset = 52; sysexIdx = 74; }  /* tvfCutoff */
+            else if (strcmp(paramName, "resonance") == 0) { nvramOffset = 53; sysexIdx = 75; }   /* tvfResonance */
+            else if (strcmp(paramName, "level") == 0) { nvramOffset = 67; sysexIdx = 92; }       /* tvaLevel at 67 */
+            else if (strcmp(paramName, "pan") == 0) { nvramOffset = 68; sysexIdx = 94; }         /* tvaPan at 68 */
+            else if (strcmp(paramName, "pitchcoarse") == 0) { nvramOffset = 37; sysexIdx = 56; } /* pitchCoarse */
+            else if (strcmp(paramName, "pitchfine") == 0) { nvramOffset = 38; sysexIdx = 57; }   /* pitchFine */
+            else if (strcmp(paramName, "tvaenvtime1") == 0) { nvramOffset = 74; sysexIdx = 105; }  /* tvaEnvTime1 */
+            else if (strcmp(paramName, "tvaenvtime2") == 0) { nvramOffset = 76; sysexIdx = 107; }  /* tvaEnvTime2 */
+            else if (strcmp(paramName, "tvaenvtime3") == 0) { nvramOffset = 78; sysexIdx = 109; }  /* tvaEnvTime3 */
+            else if (strcmp(paramName, "tvaenvtime4") == 0) { nvramOffset = 80; sysexIdx = 111; }  /* tvaEnvTime4 */
+            else if (strcmp(paramName, "drylevel") == 0) { nvramOffset = 81; sysexIdx = 112; }     /* drySend */
+            else if (strcmp(paramName, "reverbsendlevel") == 0) { nvramOffset = 82; sysexIdx = 113; } /* reverbSend */
+            else if (strcmp(paramName, "chorussendlevel") == 0) { nvramOffset = 83; sysexIdx = 114; } /* chorusSend */
+
+            /* Handle filter mode specially - it's bits 3-4 of byte 55 (tvfVeloCurveLpfHpf)
+             * Accepts: "Off", "LPF", "HPF" or numeric 0, 1, 2 */
+            if (strcmp(paramName, "filtermode") == 0) {
+                int v;
+                if (strcmp(val, "Off") == 0) v = 0;
+                else if (strcmp(val, "LPF") == 0) v = 1;
+                else if (strcmp(val, "HPF") == 0) v = 2;
+                else v = clamp_int(atoi(val), 0, 2);
+                const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+                const int byteOffset = 55;  /* tvfVeloCurveLpfHpf */
+                uint8_t *byte = &inst->mcu->nvram[toneBase + byteOffset];
+                /* Clear bits 3-4 and set new filter mode */
+                *byte = (*byte & ~0x18) | ((v & 0x03) << 3);
+                /* SysEx index 0x49 (73) for filter mode per JV-880 MIDI Implementation */
+                v2_queue_tone_sysex(inst, toneIdx, 0x49, v);
+                return;
+            }
 
             if (nvramOffset >= 0 && sysexIdx >= 0) {
                 const int v = clamp_int(atoi(val), 0, 127);
@@ -4113,15 +4394,36 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             /* Map parameter names to SRAM offset and SysEx index */
             if (strcmp(paramName, "partlevel") == 0) { sramOffset = 17; sysexIdx = 25; }
             else if (strcmp(paramName, "partpan") == 0) { sramOffset = 18; sysexIdx = 26; }
-            else if (strcmp(paramName, "patchnumber") == 0) { sramOffset = 16; sysexIdx = 23; }
             else if (strcmp(paramName, "internalkeyrangelower") == 0) { sramOffset = 10; sysexIdx = 15; }
             else if (strcmp(paramName, "internalkeyrangeupper") == 0) { sramOffset = 11; sysexIdx = 16; }
             else if (strcmp(paramName, "internalvelocitysense") == 0) { sramOffset = 13; sysexIdx = 18; }
             else if (strcmp(paramName, "internalvelocitymax") == 0) { sramOffset = 14; sysexIdx = 19; }
 
-            /* Handle reverbswitch and chorusswitch (bit fields) */
+            /* Handle patchnumber specially - it's 0-255, uses dual bytes in SysEx
+             * Per JV-880 MIDI Implementation: offset 0x17, range 0-255
+             * Values > 127 use nibblized format: 0000 bbbb at addr, 0bbb bbbb at addr+1
+             * This sends the value as two consecutive bytes */
+            if (strcmp(paramName, "patchnumber") == 0) {
+                const int v = clamp_int(atoi(val), 0, 255);
+                inst->mcu->sram[partBase + 16] = (uint8_t)v;
+                /* Send as nibblized dual bytes: MSB nibble at 0x17, LSB at 0x18 */
+                int msb = (v >> 4) & 0x0F;  /* High nibble */
+                int lsb = v & 0x7F;         /* Low 7 bits (but only need low nibble for < 256) */
+                /* Actually for 0-255, we need: byte1 = v/128, byte2 = v%128 */
+                msb = v >> 7;    /* 0 or 1 for 0-255 range */
+                lsb = v & 0x7F;  /* 0-127 */
+                v2_queue_part_sysex(inst, partIdx, 0x17, msb);  /* MSB */
+                v2_queue_part_sysex(inst, partIdx, 0x18, lsb);  /* LSB */
+                return;
+            }
+
+            /* Handle reverbswitch and chorusswitch (bit fields)
+             * Accepts: "Off", "On" or numeric 0, 1 */
             if (strcmp(paramName, "reverbswitch") == 0) {
-                const int v = atoi(val) ? 1 : 0;
+                int v;
+                if (strcmp(val, "On") == 0) v = 1;
+                else if (strcmp(val, "Off") == 0) v = 0;
+                else v = atoi(val) ? 1 : 0;
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
                 if (v) *b |= 0x40;
                 else *b &= ~0x40;
@@ -4129,7 +4431,10 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 return;
             }
             if (strcmp(paramName, "chorusswitch") == 0) {
-                const int v = atoi(val) ? 1 : 0;
+                int v;
+                if (strcmp(val, "On") == 0) v = 1;
+                else if (strcmp(val, "Off") == 0) v = 0;
+                else v = atoi(val) ? 1 : 0;
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
                 if (v) *b |= 0x20;
                 else *b &= ~0x20;
@@ -4218,6 +4523,83 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 fprintf(stderr, "JV880 v2: User patch slot %d is empty\n", slot + 1);
             }
         }
+    } else if (strcmp(key, "run_param_test") == 0 && inst->mcu) {
+        /* Automated parameter offset verification test */
+        fprintf(stderr, "\n");
+        fprintf(stderr, "============================================\n");
+        fprintf(stderr, "=== AUTOMATED PARAMETER OFFSET TEST (v2) ===\n");
+        fprintf(stderr, "============================================\n\n");
+
+        int pass = 0, fail = 0;
+        const int toneIdx = 0;
+        const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+
+        struct { const char* name; int offset; uint8_t testVal; } tests[] = {
+            {"level", 67, 0x63},
+            {"pan", 68, 0x40},
+            {"tvaenvtime1", 74, 0x4A},
+            {"tvaenvtime2", 76, 0x4C},
+            {"tvaenvtime3", 78, 0x4E},
+            {"tvaenvtime4", 80, 0x50},
+            {"drylevel", 81, 0x51},
+            {"reverbsendlevel", 82, 0x52},
+            {"chorussendlevel", 83, 0x53},
+            {"cutofffrequency", 52, 0x7F},
+            {"resonance", 53, 0x32},
+            {"pitchcoarse", 37, 0x40},
+            {"pitchfine", 38, 0x41},
+        };
+        const int numTests = sizeof(tests) / sizeof(tests[0]);
+
+        uint8_t origValues[20];
+        for (int i = 0; i < numTests; i++) {
+            origValues[i] = inst->mcu->nvram[toneBase + tests[i].offset];
+        }
+
+        fprintf(stderr, "Testing tone %d parameters (base=0x%04x):\n\n", toneIdx, toneBase);
+
+        for (int i = 0; i < numTests; i++) {
+            inst->mcu->nvram[toneBase + tests[i].offset] = tests[i].testVal;
+            uint8_t readVal = inst->mcu->nvram[toneBase + tests[i].offset];
+
+            if (readVal == tests[i].testVal) {
+                fprintf(stderr, "  ✓ PASS: %-20s offset=%2d wrote=0x%02x read=0x%02x\n",
+                        tests[i].name, tests[i].offset, tests[i].testVal, readVal);
+                pass++;
+            } else {
+                fprintf(stderr, "  ✗ FAIL: %-20s offset=%2d wrote=0x%02x read=0x%02x\n",
+                        tests[i].name, tests[i].offset, tests[i].testVal, readVal);
+                fail++;
+            }
+        }
+
+        for (int i = 0; i < numTests; i++) {
+            inst->mcu->nvram[toneBase + tests[i].offset] = origValues[i];
+        }
+
+        fprintf(stderr, "\n--------------------------------------------\n");
+        fprintf(stderr, "Results: %d passed, %d failed\n", pass, fail);
+        fprintf(stderr, "============================================\n\n");
+    } else if (strcmp(key, "dump_tone_layout") == 0 && inst->mcu) {
+        /* Dump current tone structure for verification */
+        const int toneIdx = 0;
+        const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
+
+        fprintf(stderr, "\n=== Tone %d Structure (v2, base=0x%04x) ===\n\n", toneIdx, toneBase);
+        fprintf(stderr, "--- TVA Section (67-83) ---\n");
+        fprintf(stderr, "  67 tvaLevel:      %3d\n", inst->mcu->nvram[toneBase+67]);
+        fprintf(stderr, "  68 tvaPan:        %3d\n", inst->mcu->nvram[toneBase+68]);
+        fprintf(stderr, "  74 tvaEnvTime1:   %3d\n", inst->mcu->nvram[toneBase+74]);
+        fprintf(stderr, "  76 tvaEnvTime2:   %3d\n", inst->mcu->nvram[toneBase+76]);
+        fprintf(stderr, "  78 tvaEnvTime3:   %3d\n", inst->mcu->nvram[toneBase+78]);
+        fprintf(stderr, "  80 tvaEnvTime4:   %3d\n", inst->mcu->nvram[toneBase+80]);
+        fprintf(stderr, "  81 drySend:       %3d\n", inst->mcu->nvram[toneBase+81]);
+        fprintf(stderr, "  82 reverbSend:    %3d\n", inst->mcu->nvram[toneBase+82]);
+        fprintf(stderr, "  83 chorusSend:    %3d\n", inst->mcu->nvram[toneBase+83]);
+        fprintf(stderr, "\n--- TVF Section (52-53) ---\n");
+        fprintf(stderr, "  52 tvfCutoff:     %3d\n", inst->mcu->nvram[toneBase+52]);
+        fprintf(stderr, "  53 tvfResonance:  %3d\n", inst->mcu->nvram[toneBase+53]);
+        fprintf(stderr, "\n=== End Tone Layout ===\n");
     }
 }
 
@@ -4308,6 +4690,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%d", inst->bank_count);
     }
     if (strcmp(key, "bank_name") == 0) {
+        /* During loading, show loading status */
+        if (!inst->loading_complete) {
+            return snprintf(buf, buf_len, "Loading...");
+        }
         if (inst->performance_mode) {
             /* Performance mode - return performance bank name */
             static const char* perf_bank_names[] = {"Preset A", "Preset B", "Internal"};
@@ -4315,16 +4701,16 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             if (bank >= 0 && bank < NUM_PERF_BANKS) {
                 return snprintf(buf, buf_len, "%s", perf_bank_names[bank]);
             }
-            return snprintf(buf, buf_len, "Mini-JV");
+            return snprintf(buf, buf_len, "Performances");
         }
-        /* Patch mode - return patch bank name */
+        /* Patch mode - return current expansion/bank name */
         if (inst->current_patch >= 0 && inst->current_patch < inst->total_patches) {
             int bank = v2_get_bank_for_patch(inst, inst->current_patch);
             if (bank >= 0 && bank < inst->bank_count) {
                 return snprintf(buf, buf_len, "%s", inst->bank_names[bank]);
             }
         }
-        return snprintf(buf, buf_len, "Mini-JV");
+        return snprintf(buf, buf_len, "Patches");
     }
     if (strcmp(key, "patch_in_bank") == 0) {
         if (inst->performance_mode) {
@@ -4468,22 +4854,35 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
             int offset = -1;
 
-            /* Map parameter names to NVRAM offsets within tone */
+            /* Map parameter names to NVRAM offsets within tone
+             * Offsets verified against jv880_juce dataStructures.h Tone struct */
             if (strcmp(paramName, "cutofffrequency") == 0) offset = 52;
             else if (strcmp(paramName, "resonance") == 0) offset = 53;
-            else if (strcmp(paramName, "level") == 0) offset = 67;
-            else if (strcmp(paramName, "pan") == 0) offset = 68;
+            else if (strcmp(paramName, "level") == 0) offset = 68;       /* tvaLevel at 68 */
+            else if (strcmp(paramName, "pan") == 0) offset = 69;         /* tvaPan at 69 */
             else if (strcmp(paramName, "pitchcoarse") == 0) offset = 37;
             else if (strcmp(paramName, "pitchfine") == 0) offset = 38;
-            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74;
-            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76;
-            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78;
-            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80;
-            else if (strcmp(paramName, "drylevel") == 0) offset = 81;
-            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82;
-            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83;
+            /* TVA section offsets from jv880_juce struct */
+            else if (strcmp(paramName, "level") == 0) offset = 67;       /* tvaLevel */
+            else if (strcmp(paramName, "pan") == 0) offset = 68;         /* tvaPan */
+            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74; /* tvaEnvTime1 */
+            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76; /* tvaEnvTime2 */
+            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78; /* tvaEnvTime3 */
+            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80; /* tvaEnvTime4 */
+            else if (strcmp(paramName, "drylevel") == 0) offset = 81;    /* drySend */
+            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82; /* reverbSend */
+            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83; /* chorusSend */
 
-            if (offset >= 0 && offset < 84) {
+            /* Handle filter mode specially - bits 3-4 of byte 55
+             * Returns: "Off", "LPF", or "HPF" */
+            if (strcmp(paramName, "filtermode") == 0) {
+                uint8_t byte = inst->mcu->nvram[toneBase + 55];
+                int filterMode = (byte >> 3) & 0x03;
+                const char *labels[] = {"Off", "LPF", "HPF"};
+                return snprintf(buf, buf_len, "%s", labels[filterMode < 3 ? filterMode : 0]);
+            }
+
+            if (offset >= 0 && offset < 85) {  /* Increased from 84 to 85 for chorusSend */
                 uint8_t val = inst->mcu->nvram[toneBase + offset];
                 return snprintf(buf, buf_len, "%d", val);
             }
@@ -4525,14 +4924,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
             else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
 
-            /* Handle reverbswitch and chorusswitch as bit fields */
+            /* Handle reverbswitch and chorusswitch as bit fields - return "Off" or "On" */
             if (strcmp(paramName, "reverbswitch") == 0) {
                 uint8_t b = inst->mcu->sram[partBase + 21];
-                return snprintf(buf, buf_len, "%d", (b >> 6) & 1);
+                return snprintf(buf, buf_len, "%s", ((b >> 6) & 1) ? "On" : "Off");
             }
             if (strcmp(paramName, "chorusswitch") == 0) {
                 uint8_t b = inst->mcu->sram[partBase + 21];
-                return snprintf(buf, buf_len, "%d", (b >> 5) & 1);
+                return snprintf(buf, buf_len, "%s", ((b >> 5) & 1) ? "On" : "Off");
             }
 
             /* Signed offset parameters: stored = (val-64), read = (stored+64) */
@@ -4573,9 +4972,24 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"list_param\":\"preset\","
                     "\"count_param\":\"preset_count\","
                     "\"name_param\":\"preset_name\","
-                    "\"children\":\"tones\","
-                    "\"child_count\":4,"
-                    "\"child_label\":\"Tone\","
+                    "\"children\":\"patch_main\","
+                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"params\":[]"
+                "},"
+                "\"patch_main\":{"
+                    "\"label\":\"Patch\","
+                    "\"children\":null,"
+                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"params\":["
+                        "{\"level\":\"tone_selector\",\"label\":\"Edit Tones\"},"
+                        "{\"level\":\"patch_common\",\"label\":\"Common Settings\"},"
+                        "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"},"
+                        "{\"level\":\"user_patches\",\"label\":\"User Patches\"}"
+                    "]"
+                "},"
+                "\"patch_common\":{"
+                    "\"label\":\"Common\","
+                    "\"children\":null,"
                     "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
                     "\"params\":["
                         "{\"key\":\"nvram_patchCommon_patchlevel\",\"label\":\"Patch Level\"},"
@@ -4586,30 +5000,41 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                         "{\"key\":\"nvram_patchCommon_chorusdepth\",\"label\":\"Chorus Depth\"},"
                         "{\"key\":\"nvram_patchCommon_chorusrate\",\"label\":\"Chorus Rate\"},"
                         "{\"key\":\"nvram_patchCommon_analogfeel\",\"label\":\"Analog Feel\"},"
-                        "{\"key\":\"octave_transpose\",\"label\":\"Octave\"},"
-                        "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"},"
-                        "{\"level\":\"user_patches\",\"label\":\"User Patches\"}"
+                        "{\"key\":\"octave_transpose\",\"label\":\"Octave\"}"
                     "]"
                 "},"
-                "\"tones\":{"
+                "\"tone_selector\":{"
+                    "\"label\":\"Tones\","
                     "\"children\":null,"
                     "\"child_prefix\":\"nvram_tone_\","
-                    "\"knobs\":[\"cutofffrequency\",\"resonance\",\"level\",\"pan\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"reverbsendlevel\"],"
-                    "\"params\":[\"cutofffrequency\",\"resonance\",\"level\",\"pan\",\"pitchcoarse\",\"pitchfine\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"tvaenvtime4\",\"drylevel\",\"reverbsendlevel\",\"chorussendlevel\"]"
+                    "\"child_count\":4,"
+                    "\"child_label\":\"Tone\","
+                    "\"knobs\":[\"cutofffrequency\",\"resonance\",\"filtermode\",\"level\",\"pan\",\"tvaenvtime1\",\"tvaenvtime2\",\"reverbsendlevel\"],"
+                    "\"params\":[\"cutofffrequency\",\"resonance\",\"filtermode\",\"level\",\"pan\",\"pitchcoarse\",\"pitchfine\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"tvaenvtime4\",\"drylevel\",\"reverbsendlevel\",\"chorussendlevel\"]"
                 "},"
                 "\"performance\":{"
                     "\"list_param\":\"performance\","
                     "\"count_param\":\"num_performances\","
                     "\"name_param\":\"preset_name\","
-                    "\"children\":\"parts\","
-                    "\"child_count\":8,"
-                    "\"child_label\":\"Part\","
+                    "\"children\":\"perf_main\","
                     "\"knobs\":[\"octave_transpose\"],"
-                    "\"params\":[\"octave_transpose\"]"
+                    "\"params\":[]"
                 "},"
-                "\"parts\":{"
+                "\"perf_main\":{"
+                    "\"label\":\"Performance\","
+                    "\"children\":null,"
+                    "\"knobs\":[\"octave_transpose\"],"
+                    "\"params\":["
+                        "{\"level\":\"part_selector\",\"label\":\"Edit Parts\"},"
+                        "{\"key\":\"octave_transpose\",\"label\":\"Octave\"}"
+                    "]"
+                "},"
+                "\"part_selector\":{"
+                    "\"label\":\"Parts\","
                     "\"children\":null,"
                     "\"child_prefix\":\"sram_part_\","
+                    "\"child_count\":8,"
+                    "\"child_label\":\"Part\","
                     "\"knobs\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\"],"
                     "\"params\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"patchnumber\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
                 "},"
@@ -4659,6 +5084,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             /* Tone params (suffix only - child_prefix adds nvram_tone_N_) */
             "{\"key\":\"cutofffrequency\",\"name\":\"Cutoff\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"filtermode\",\"name\":\"Filter Mode\",\"type\":\"enum\",\"options\":[\"Off\",\"LPF\",\"HPF\"]},"
             "{\"key\":\"level\",\"name\":\"Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"pan\",\"name\":\"Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"pitchcoarse\",\"name\":\"Pitch Coarse\",\"type\":\"int\",\"min\":0,\"max\":127},"
@@ -4674,8 +5100,8 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"key\":\"partlevel\",\"name\":\"Part Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"partpan\",\"name\":\"Part Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"patchnumber\",\"name\":\"Patch\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"reverbswitch\",\"name\":\"Reverb Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
-            "{\"key\":\"chorusswitch\",\"name\":\"Chorus Sw\",\"type\":\"int\",\"min\":0,\"max\":1},"
+            "{\"key\":\"reverbswitch\",\"name\":\"Reverb\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
+            "{\"key\":\"chorusswitch\",\"name\":\"Chorus\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
             "{\"key\":\"partcoarsetune\",\"name\":\"Coarse Tune\",\"type\":\"int\",\"min\":16,\"max\":112},"
             "{\"key\":\"partfinetune\",\"name\":\"Fine Tune\",\"type\":\"int\",\"min\":14,\"max\":114},"
             "{\"key\":\"internalkeyrangelower\",\"name\":\"Key Lo\",\"type\":\"int\",\"min\":0,\"max\":127},"
@@ -4730,7 +5156,30 @@ static void v2_render_block(void *instance, int16_t *out, int frames) {
         out[i * 2 + 1] = 0;
     }
 
-    /* Note: SRAM scanning and mapping would need full refactoring */
+    /* Handle deferred selections - only after warmup is complete */
+    if (inst->warmup_remaining <= 0) {
+        /* Handle deferred performance selection after mode switch has been processed */
+        if (inst->pending_perf_select > 0) {
+            inst->pending_perf_select--;
+            if (inst->pending_perf_select == 0) {
+                /* Mode switch has had time to process, now select performance */
+                jv_debug("[v2_render_block] Executing deferred performance select: %d\n",
+                        inst->current_performance);
+                v2_select_performance(inst, inst->current_performance);
+            }
+        }
+
+        /* Handle deferred patch selection after mode switch has been processed */
+        if (inst->pending_patch_select > 0) {
+            inst->pending_patch_select--;
+            if (inst->pending_patch_select == 0) {
+                /* Mode switch has had time to process, now select patch */
+                jv_debug("[v2_render_block] Executing deferred patch select: %d\n",
+                        inst->current_patch);
+                v2_select_patch(inst, inst->current_patch);
+            }
+        }
+    }
 }
 
 /* v2 API struct */

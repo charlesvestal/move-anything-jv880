@@ -38,6 +38,10 @@ if [ -d "src/chain_patches" ]; then
     scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/patches/
 fi
 
+# Create expansions directory for SR-JV80 expansion ROMs
+echo "Creating expansions directory..."
+ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/sound_generators/minijv/roms/expansions"
+
 # Set permissions so Module Store can update later
 echo "Setting permissions..."
 ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/sound_generators/minijv"
