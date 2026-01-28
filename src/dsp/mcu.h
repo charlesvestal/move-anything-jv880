@@ -368,10 +368,18 @@ struct MCU {
   uint8_t TIMER_Read2(const uint32_t address);
 
   inline void MCU_PostSample(int *sample) {
-    int16_t l = sample[0] >> 16;
-    int16_t r = sample[1] >> 16;
-    sample_buffer[sample_write_ptr++] = l;
-    sample_buffer[sample_write_ptr++] = r;
+    /* Use int32 intermediate to detect overflow before casting to int16 */
+    int32_t l = sample[0] >> 16;
+    int32_t r = sample[1] >> 16;
+
+    /* Saturate to prevent wrap-around clipping on polyphonic passages */
+    if (l > 32767) l = 32767;
+    else if (l < -32768) l = -32768;
+    if (r > 32767) r = 32767;
+    else if (r < -32768) r = -32768;
+
+    sample_buffer[sample_write_ptr++] = (int16_t)l;
+    sample_buffer[sample_write_ptr++] = (int16_t)r;
     sample_write_ptr %= audio_buffer_size;
   }
 
