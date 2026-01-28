@@ -16,6 +16,9 @@
 #include <math.h>
 
 #include "mcu.h"
+extern "C" {
+#include "resample/libresample.h"
+}
 
 extern "C" {
 #include "plugin_api_v1.h"
@@ -2935,6 +2938,14 @@ typedef struct {
     int pending_patch_select;  /* Countdown to select patch after mode switch */
     volatile int warmup_remaining;  /* Warmup cycles remaining after reset */
 
+    /* Resampling state (libresample) */
+    void *resampleL;
+    void *resampleR;
+    float resample_in_l[4096];  /* Input buffer for resampler */
+    float resample_in_r[4096];
+    float resample_out_l[4096]; /* Output buffer for resampler */
+    float resample_out_r[4096];
+
     /* Loading state */
     char loading_status[256];
     int loading_complete;
@@ -3529,39 +3540,42 @@ static void* v2_load_thread_func(void *arg) {
     inst->ring_write = 0;
     inst->ring_read = 0;
 
-    BiquadFilter aa_filter;
-    biquad_init(&aa_filter);
-    const double step = (double)JV880_SAMPLE_RATE / (double)MOVE_SAMPLE_RATE;
-    double resample_pos = 0.0;
-    double prev_l = 0.0, prev_r = 0.0;
-    double curr_l = 0.0, curr_r = 0.0;
+    /* Initialize high-quality resampler (66207 Hz -> 48000 Hz) */
+    double ratio = (double)MOVE_SAMPLE_RATE / (double)JV880_SAMPLE_RATE;
+    inst->resampleL = resample_open(1, ratio, ratio);  /* High quality */
+    inst->resampleR = resample_open(1, ratio, ratio);
+    fprintf(stderr, "JV880 v2: Resampler initialized (ratio %.4f)\n", ratio);
 
     fprintf(stderr, "JV880 v2: Pre-filling buffer...\n");
     snprintf(inst->loading_status, sizeof(inst->loading_status), "Preparing audio...");
     for (int i = 0; i < 256 && inst->ring_write < AUDIO_RING_SIZE / 2; i++) {
         inst->mcu->updateSC55(8);
         int avail = inst->mcu->sample_write_ptr;
+        int in_samples = avail / 2;
 
-        for (int j = 0; j < avail && inst->ring_write < AUDIO_RING_SIZE / 2; j += 2) {
-            double in_l = (double)inst->mcu->sample_buffer[j];
-            double in_r = (double)inst->mcu->sample_buffer[j + 1];
-            double filt_l, filt_r;
-            biquad_process(&aa_filter, in_l, in_r, &filt_l, &filt_r);
+        if (in_samples > 0 && in_samples < 4096) {
+            /* Convert int16 to float for resampler */
+            for (int j = 0; j < in_samples; j++) {
+                inst->resample_in_l[j] = (float)inst->mcu->sample_buffer[j * 2] / 32768.0f;
+                inst->resample_in_r[j] = (float)inst->mcu->sample_buffer[j * 2 + 1] / 32768.0f;
+            }
 
-            prev_l = curr_l;
-            prev_r = curr_r;
-            curr_l = filt_l;
-            curr_r = filt_r;
-            resample_pos += 1.0;
+            /* Resample */
+            int inUsedL = 0, inUsedR = 0;
+            int outL = resample_process(inst->resampleL, ratio, inst->resample_in_l, in_samples,
+                                        0, &inUsedL, inst->resample_out_l, 4096);
+            int outR = resample_process(inst->resampleR, ratio, inst->resample_in_r, in_samples,
+                                        0, &inUsedR, inst->resample_out_r, 4096);
+            int out_samples = (outL < outR) ? outL : outR;
 
-            while (resample_pos >= step && inst->ring_write < AUDIO_RING_SIZE / 2) {
-                resample_pos -= step;
-                double t = 1.0 - (resample_pos / 1.0);
-                if (t < 0.0) t = 0.0;
-                if (t > 1.0) t = 1.0;
-
-                inst->audio_ring[inst->ring_write * 2 + 0] = (int32_t)(prev_l + t * (curr_l - prev_l));
-                inst->audio_ring[inst->ring_write * 2 + 1] = (int32_t)(prev_r + t * (curr_r - prev_r));
+            /* Copy to ring buffer */
+            for (int j = 0; j < out_samples && inst->ring_write < AUDIO_RING_SIZE / 2; j++) {
+                int32_t l = (int32_t)(inst->resample_out_l[j] * 32768.0f);
+                int32_t r = (int32_t)(inst->resample_out_r[j] * 32768.0f);
+                if (l > 32767) l = 32767; if (l < -32768) l = -32768;
+                if (r > 32767) r = 32767; if (r < -32768) r = -32768;
+                inst->audio_ring[inst->ring_write * 2 + 0] = (int16_t)l;
+                inst->audio_ring[inst->ring_write * 2 + 1] = (int16_t)r;
                 inst->ring_write = (inst->ring_write + 1) % AUDIO_RING_SIZE;
             }
         }
@@ -3711,6 +3725,16 @@ static void v2_destroy_instance(void *instance) {
         pthread_join(inst->emu_thread, NULL);
     }
 
+    /* Cleanup resampler */
+    if (inst->resampleL) {
+        resample_close(inst->resampleL);
+        inst->resampleL = nullptr;
+    }
+    if (inst->resampleR) {
+        resample_close(inst->resampleR);
+        inst->resampleR = nullptr;
+    }
+
     /* Cleanup emulator */
     if (inst->mcu) {
         delete inst->mcu;
@@ -3775,13 +3799,7 @@ static void* v2_emu_thread_func(void *arg) {
     jv880_instance_t *inst = (jv880_instance_t*)arg;
     fprintf(stderr, "JV880 v2: Emulation thread started\n");
 
-    BiquadFilter aa_filter;
-    biquad_init(&aa_filter);
-
-    const double step = (double)JV880_SAMPLE_RATE / (double)MOVE_SAMPLE_RATE;
-    double resample_pos = 0.0;
-    double prev_l = 0.0, prev_r = 0.0;
-    double curr_l = 0.0, curr_r = 0.0;
+    const double ratio = (double)MOVE_SAMPLE_RATE / (double)JV880_SAMPLE_RATE;
 
     while (inst->thread_running) {
         /* Handle warmup after SC55_Reset */
@@ -3821,52 +3839,42 @@ static void* v2_emu_thread_func(void *arg) {
 
         inst->mcu->updateSC55(64);
         int avail = inst->mcu->sample_write_ptr;
+        int in_samples = avail / 2;  /* Stereo pairs */
 
-        /* Local buffer to batch resampled output (reduces mutex contention) */
-        int16_t local_buf[128 * 2];  /* Max ~46 samples per updateSC55(64) */
-        int local_count = 0;
-
-        /* Process all input samples through anti-aliasing filter */
-        for (int i = 0; i < avail; i += 2) {
-            double in_l = (double)inst->mcu->sample_buffer[i];
-            double in_r = (double)inst->mcu->sample_buffer[i + 1];
-            double filt_l, filt_r;
-            biquad_process(&aa_filter, in_l, in_r, &filt_l, &filt_r);
-
-            prev_l = curr_l;
-            prev_r = curr_r;
-            curr_l = filt_l;
-            curr_r = filt_r;
-            resample_pos += 1.0;
-
-            while (resample_pos >= step && local_count < 128) {
-                resample_pos -= step;
-
-                double t = 1.0 - (resample_pos / 1.0);
-                if (t < 0.0) t = 0.0;
-                if (t > 1.0) t = 1.0;
-
-                int32_t out_l = (int32_t)(prev_l + t * (curr_l - prev_l));
-                int32_t out_r = (int32_t)(prev_r + t * (curr_r - prev_r));
-
-                local_buf[local_count * 2 + 0] = out_l;
-                local_buf[local_count * 2 + 1] = out_r;
-                local_count++;
+        if (in_samples > 0 && in_samples < 4096) {
+            /* Convert int16 to float for resampler (separate L/R channels) */
+            for (int i = 0; i < in_samples; i++) {
+                inst->resample_in_l[i] = (float)inst->mcu->sample_buffer[i * 2] / 32768.0f;
+                inst->resample_in_r[i] = (float)inst->mcu->sample_buffer[i * 2 + 1] / 32768.0f;
             }
-        }
 
-        /* Batch copy to ring buffer with single lock */
-        if (local_count > 0) {
-            pthread_mutex_lock(&inst->ring_mutex);
-            int free_now = v2_ring_free(inst);
-            int to_write = (local_count < free_now) ? local_count : free_now;
-            for (int i = 0; i < to_write; i++) {
-                int wr = inst->ring_write;
-                inst->audio_ring[wr * 2 + 0] = local_buf[i * 2 + 0];
-                inst->audio_ring[wr * 2 + 1] = local_buf[i * 2 + 1];
-                inst->ring_write = (wr + 1) % AUDIO_RING_SIZE;
+            /* Resample using high-quality polyphase filter */
+            int inUsedL = 0, inUsedR = 0;
+            int outL = resample_process(inst->resampleL, ratio, inst->resample_in_l, in_samples,
+                                        0, &inUsedL, inst->resample_out_l, 4096);
+            int outR = resample_process(inst->resampleR, ratio, inst->resample_in_r, in_samples,
+                                        0, &inUsedR, inst->resample_out_r, 4096);
+
+            int out_samples = (outL < outR) ? outL : outR;
+
+            /* Batch copy to ring buffer with single lock */
+            if (out_samples > 0) {
+                pthread_mutex_lock(&inst->ring_mutex);
+                int free_now = v2_ring_free(inst);
+                int to_write = (out_samples < free_now) ? out_samples : free_now;
+                for (int i = 0; i < to_write; i++) {
+                    int wr = inst->ring_write;
+                    /* Convert float back to int16 */
+                    int32_t l = (int32_t)(inst->resample_out_l[i] * 32768.0f);
+                    int32_t r = (int32_t)(inst->resample_out_r[i] * 32768.0f);
+                    if (l > 32767) l = 32767; if (l < -32768) l = -32768;
+                    if (r > 32767) r = 32767; if (r < -32768) r = -32768;
+                    inst->audio_ring[wr * 2 + 0] = (int16_t)l;
+                    inst->audio_ring[wr * 2 + 1] = (int16_t)r;
+                    inst->ring_write = (wr + 1) % AUDIO_RING_SIZE;
+                }
+                pthread_mutex_unlock(&inst->ring_mutex);
             }
-            pthread_mutex_unlock(&inst->ring_mutex);
         }
     }
 
