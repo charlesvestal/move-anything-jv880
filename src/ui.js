@@ -1,60 +1,24 @@
 /*
- * Mini-JV Module UI - Menu-Driven Version
+ * Mini-JV Module UI - Hierarchy-Driven Version
  *
- * Two main modes:
- * - Browser: Shows current patch, jog to browse, knobs for macros
- * - Menu: Hierarchical menu navigation for editing and settings
+ * Reads ui_hierarchy from the plugin and renders menus based on it.
+ * Same UI structure in both standalone and shadow mode.
  */
 
-import * as std from 'std';
-
-/* Shared utilities - absolute path for module location independence */
 import {
-    BrightGreen, BrightRed, DarkGrey, LightGrey, White, ForestGreen,
     MoveMainKnob, MoveMainButton,
     MoveLeft, MoveRight, MoveUp, MoveDown,
-    MoveShift, MoveMenu, MoveBack, MoveMute, MoveCapture,
+    MoveShift, MoveMenu, MoveBack,
     MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4,
     MoveKnob5, MoveKnob6, MoveKnob7, MoveKnob8,
-    MoveRow1, MoveRow2, MoveRow3, MoveRow4,
-    MoveSteps, MovePads
+    MovePads
 } from '/data/UserData/move-anything/shared/constants.mjs';
 
-import { isCapacitiveTouchMessage, setLED, setButtonLED, decodeDelta, decodeAcceleratedDelta } from '/data/UserData/move-anything/shared/input_filter.mjs';
-
-import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
-import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
-import { drawHierarchicalMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
-import { showOverlay, hideOverlay, tickOverlay, drawOverlay, isOverlayActive } from '/data/UserData/move-anything/shared/menu_layout.mjs';
-
-import { getMainMenu, getPatchBanksMenu, getPerformancesMenu, getEditMenu, setStateAccessor as setMenuStateAccessor } from './ui_menu.mjs';
-import {
-    drawBrowser, drawLoadingScreen, drawActivityOverlay,
-    setStateAccessor as setBrowserStateAccessor
-} from './ui_browser.mjs';
-
-import {
-    buildSystemMode,
-    buildPatchCommonParam,
-    buildToneParam,
-    buildPerformanceCommonParam,
-    buildPartParam,
-    buildDrumParam,
-    clampValue,
-    PATCH_COMMON_PARAMS,
-    TONE_PARAMS
-} from './jv880_sysex.mjs';
+import { isCapacitiveTouchMessage, decodeDelta } from '/data/UserData/move-anything/shared/input_filter.mjs';
 
 /* === Constants === */
 const SCREEN_WIDTH = 128;
 const SCREEN_HEIGHT = 64;
-
-/* LED colors for 5-state system */
-const LED_OFF = 0;  /* Velocity 0 = LED completely off */
-const LED_GREY = LightGrey;        /* Muted, not selected */
-const LED_WHITE = White;           /* Muted, selected */
-const LED_DIM_GREEN = ForestGreen; /* Enabled, not selected */
-const LED_BRIGHT_GREEN = BrightGreen;  /* Enabled, selected */
 
 const CC_JOG = MoveMainKnob;
 const CC_JOG_CLICK = MoveMainButton;
@@ -65,943 +29,634 @@ const CC_DOWN = MoveDown;
 const CC_SHIFT = MoveShift;
 const CC_MENU = MoveMenu;
 const CC_BACK = MoveBack;
-const CC_MUTE = MoveMute;
-const CC_CAPTURE = MoveCapture;
 
-const ENCODER_CCS = [
-    MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4,
-    MoveKnob5, MoveKnob6, MoveKnob7, MoveKnob8
-];
-
-const TRACK_NOTES = [MoveRow4, MoveRow3, MoveRow2, MoveRow1];
-
-const SYSEX_DEVICE_IDS = [0x10];
-const SYSEX_THROTTLE_MS = 30;
-
-/* Patch mode macros for knobs (tone parameters) */
-const PATCH_MACROS = [
-    { label: 'Cutoff', key: 'cutofffrequency', scope: 'tone' },
-    { label: 'Resonance', key: 'resonance', scope: 'tone' },
-    { label: 'Attack', key: 'tvaenvtime1', scope: 'tone' },
-    { label: 'Release', key: 'tvaenvtime4', scope: 'tone' },
-    { label: 'LFO Rate', key: 'lfo1rate', scope: 'tone' },
-    { label: 'LFO Depth', key: 'lfo1tvfdepth', scope: 'tone' },
-    { label: 'FX Send', key: 'reverbsendlevel', scope: 'tone' },
-    { label: 'Level', key: 'level', scope: 'tone' }
-];
-
-/* Performance mode macros for knobs (part parameters) */
-const PERF_MACROS = [
-    { label: 'Level', key: 'partlevel', scope: 'part' },
-    { label: 'Pan', key: 'partpan', scope: 'part' },
-    { label: 'Coarse', key: 'partcoarsetune', scope: 'part', min: 16, max: 112 },
-    { label: 'Fine', key: 'partfinetune', scope: 'part', min: 14, max: 114 },
-    { label: 'Key Lo', key: 'internalkeyrangelower', scope: 'part' },
-    { label: 'Key Hi', key: 'internalkeyrangeupper', scope: 'part' },
-    { label: 'Vel Sns', key: 'internalvelocitysense', scope: 'part' },
-    { label: 'Vel Max', key: 'internalvelocitymax', scope: 'part', min: 1, max: 127 }
-];
+const ENCODER_CCS = [MoveKnob1, MoveKnob2, MoveKnob3, MoveKnob4, MoveKnob5, MoveKnob6, MoveKnob7, MoveKnob8];
 
 /* === State === */
-let uiMode = 'browser';  /* 'browser' | 'menu' */
-const menuStack = createMenuStack();
-const menuState = createMenuState();
+let hierarchy = null;       // Parsed ui_hierarchy
+let chainParams = null;     // Parsed chain_params (metadata)
+let chainParamsMap = {};    // key -> param metadata
 
-let currentPreset = 0;
-let patchInBank = 1;  /* 1-indexed position within current bank */
-let totalPatches = 128;
-let bankName = 'Mini-JV';
-let bankCount = 0;
-let patchName = '---';
-let bankScrollOffset = 0;
-let bankScrollTick = 0;
-let bankScrollPaused = false;
-let bankPauseTick = 0;
-const BANK_SCROLL_DELAY = 480;   /* ~8 sec before scrolling starts */
-const BANK_SCROLL_INTERVAL = 24; /* Frames between scroll steps (~400ms) */
-const BANK_SCROLL_PAUSE = 480;   /* ~8 sec pause at end before restart */
-let lcdLine0 = '';
-let lcdLine1 = '';
-let loadingStatus = 'Initializing...';
-let loadingComplete = false;
+let currentMode = 'patch';  // 'patch' or 'performance'
+let levelStack = [];        // Stack of level names for navigation
+let currentLevel = null;    // Current level object
+let menuIndex = 0;          // Selected menu item index
+let menuScroll = 0;         // Scroll offset for long menus
+
+// For child selectors (tones/parts)
+let selectedChildIndex = 0;
+
+// For list browsers (presets, performances)
+let listIndex = 0;
+let listCount = 0;
+let listName = '';
+
+// For items selectors (expansions, user patches)
+let itemsList = [];
+
+// Editing state
+let editingParam = null;    // Currently editing parameter key
+let editingValue = 0;       // Current value being edited
+
 let shiftHeld = false;
-
-let mode = 'patch';  /* 'patch' | 'performance' */
-let selectedTone = 0;
-let selectedPart = 0;
-let partBank = 0;
-const toneEnabled = [1, 1, 1, 1];
-const partEnabled = Array.from({ length: 8 }, () => 1);
-
-let octaveTranspose = 0;
-let localAudition = true;
-let midiMonitor = false;
-let sysExRx = true;
-
-let lastActivity = { text: '', until: 0 };
-const paramValues = new Map();
-const pendingSysex = new Map();
-
 let needsRedraw = true;
+let loadingComplete = false;
 let tickCount = 0;
-const REDRAW_INTERVAL = 6;
 
-/* Knob touch tracking for overlay */
-let touchedKnob = -1;
-let touchStartTick = 0;
-let globalTickCount = 0;
-let overlayExtendUntil = 0; /* Keep overlay visible until this tick */
-let lastOverlayMacro = null; /* Remember macro for extended display */
-let lastOverlayTarget = 0; /* Remember target (tone/part) for extended display */
-const MIN_OVERLAY_TICKS = 180; /* 3 seconds at 60fps */
+/* === Initialization === */
+function init() {
+    std.printf("Mini-JV Hierarchy UI: init\n");
+    loadHierarchy();
+}
 
-/* === State Accessor for Menu/Browser modules === */
-function getStateForModules() {
-    return {
-        mode,
-        patchName,
-        bankName,
-        bankScrollOffset,
-        currentPreset,
-        patchInBank,
-        totalPatches,
-        selectedTone,
-        selectedPart,
-        toneEnabled,
-        partEnabled,
-        octaveTranspose,
-        localAudition,
-        midiMonitor,
-        sysExRx,
+function loadHierarchy() {
+    const hierJson = host_module_get_param('ui_hierarchy');
+    const paramsJson = host_module_get_param('chain_params');
 
-        /* Methods */
-        getBanks: () => {
-            /* Return available banks from DSP */
-            const banks = [];
-            for (let i = 0; i < bankCount; i++) {
-                const name = host_module_get_param(`bank_${i}_name`) || `Bank ${i + 1}`;
-                banks.push({ id: i, name });
+    if (hierJson) {
+        try {
+            hierarchy = JSON.parse(hierJson);
+            std.printf("Hierarchy loaded: modes=%s\n", JSON.stringify(hierarchy.modes));
+        } catch (e) {
+            std.printf("Error parsing hierarchy: %s\n", e);
+        }
+    }
+
+    if (paramsJson) {
+        try {
+            chainParams = JSON.parse(paramsJson);
+            // Build lookup map
+            chainParamsMap = {};
+            for (const p of chainParams) {
+                chainParamsMap[p.key] = p;
             }
-            if (banks.length === 0) {
-                banks.push({ id: 0, name: 'Internal' });
-            }
-            return banks;
-        },
-        getPatchesInBank: (bankId) => {
-            /* Get patches for a bank from DSP */
-            const patches = [];
-            const startStr = host_module_get_param(`bank_${bankId}_start`);
-            const countStr = host_module_get_param(`bank_${bankId}_count`);
-            const start = startStr ? parseInt(startStr) : bankId * 128;
-            const count = countStr ? parseInt(countStr) : 128;
-
-            for (let i = 0; i < count; i++) {
-                const globalIdx = start + i;
-                const name = host_module_get_param(`patch_${globalIdx}_name`) || `Patch ${i + 1}`;
-                patches.push({ index: globalIdx, name });
-            }
-            return patches;
-        },
-        getPatchNumBase: (bankId) => {
-            /* Get JV-880 patchnumber base for this bank
-             * JV-880 encoding: 0-63=Internal, 64-127=Card, 128-191=Preset A, 192-255=Preset B
-             * Note: Only one expansion card (64 patches) can be assigned via patchnumber */
-            const baseStr = host_module_get_param(`bank_${bankId}_patchnum_base`);
-            return baseStr ? parseInt(baseStr) : 0;
-        },
-        getPerformanceName: (index) => {
-            if (!loadingComplete) {
-                return 'Loading...';
-            }
-            return host_module_get_param(`perf_${index}_name`) || `Perf ${index + 1}`;
-        },
-        loadPatch: (bankId, patchIndex) => {
-            console.log('loadPatch called:', bankId, patchIndex);
-            setMode('patch');
-            setPreset(patchIndex);
-            /* Exit menu and return to browser */
-            uiMode = 'browser';
-            menuStack.reset();
-            menuState.selectedIndex = 0;
-            menuState.editing = false;
-            updateButtonLEDs();
-            needsRedraw = true;
-            console.log('loadPatch done, uiMode:', uiMode, 'stack depth:', menuStack.depth());
-        },
-        loadPerformance: (perfIndex) => {
-            console.log('loadPerformance called:', perfIndex);
-            setMode('performance');
-            setPreset(perfIndex);
-            /* Exit menu and return to browser */
-            uiMode = 'browser';
-            menuStack.reset();
-            menuState.selectedIndex = 0;
-            menuState.editing = false;
-            updateButtonLEDs();
-            needsRedraw = true;
-            console.log('loadPerformance done, uiMode:', uiMode, 'stack depth:', menuStack.depth());
-        },
-        getParam: (scope, key, target) => getParamValue(scope, key, target),
-        setParam: (scope, key, value, target) => setParamValueAndSend(scope, key, value, target),
-        setOctave: (v) => { octaveTranspose = clamp(v, -4, 4); setActivity(`Oct ${octaveTranspose >= 0 ? '+' : ''}${octaveTranspose}`); },
-        setLocalAudition: (v) => { localAudition = v; setActivity(v ? 'Local ON' : 'Local OFF'); },
-        setMidiMonitor: (v) => { midiMonitor = v; setActivity(v ? 'Monitor ON' : 'Monitor OFF'); },
-        setSysExRx: (v) => { sysExRx = v; setActivity(v ? 'SysEx RX' : 'SysEx OFF'); }
-    };
-}
-
-/* Initialize state accessors */
-setMenuStateAccessor(getStateForModules);
-setBrowserStateAccessor(getStateForModules);
-
-/* === Utility === */
-function nowMs() {
-    return Date.now ? Date.now() : new Date().getTime();
-}
-
-function clamp(val, min, max) {
-    if (val < min) return min;
-    if (val > max) return max;
-    return val;
-}
-
-function setActivity(text, durationMs = 2000) {
-    lastActivity = { text, until: nowMs() + durationMs };
-    needsRedraw = true;
-}
-
-/* === Mode Management === */
-function setMode(newMode, force = false) {
-    if (!force && mode === newMode) return;
-    mode = newMode;
-    sendSysEx(buildSystemMode(newMode));
-    host_module_set_param('mode', newMode === 'performance' ? '1' : '0');
-    currentPreset = 0;
-    updateLEDs();
-    needsRedraw = true;
-    setActivity(newMode === 'performance' ? 'PERFORMANCE' : 'PATCH');
-}
-
-function setPreset(index) {
-    if (mode === 'performance') {
-        const numPerfs = 48;
-        if (index < 0) index = numPerfs - 1;
-        if (index >= numPerfs) index = 0;
-        currentPreset = index;
-        host_module_set_param('performance', String(currentPreset));
-    } else {
-        if (index < 0) index = totalPatches - 1;
-        if (index >= totalPatches) index = 0;
-        currentPreset = index;
-        host_module_set_param('program_change', String(currentPreset));
-    }
-    updateLEDs();
-    needsRedraw = true;
-}
-
-/* === SysEx === */
-function sendSysEx(msg) {
-    if (!msg) return;
-    if (msg[0] !== 0xF0 || msg.length < 6) {
-        host_module_send_midi(msg, 'host');
-        return;
-    }
-    const sendBytes = (bytes) => {
-        const chunkSize = 3;
-        if (bytes.length <= chunkSize) {
-            host_module_send_midi(bytes, 'host');
-            return;
-        }
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-            host_module_send_midi(bytes.slice(i, i + chunkSize), 'host');
-        }
-    };
-    for (const deviceId of SYSEX_DEVICE_IDS) {
-        const out = msg.slice();
-        out[2] = deviceId;
-        sendBytes(out);
-    }
-}
-
-function queueSysEx(key, msg) {
-    if (!msg) return;
-    const now = nowMs();
-    let entry = pendingSysex.get(key);
-    if (!entry) {
-        entry = { msg, lastSent: 0, dueAt: 0 };
-        pendingSysex.set(key, entry);
-    } else {
-        entry.msg = msg;
-    }
-
-    if (now - entry.lastSent >= SYSEX_THROTTLE_MS) {
-        sendSysEx(entry.msg);
-        entry.lastSent = now;
-        entry.dueAt = 0;
-    } else {
-        entry.dueAt = entry.lastSent + SYSEX_THROTTLE_MS;
-    }
-}
-
-function flushPendingSysEx() {
-    if (pendingSysex.size === 0) return;
-    const now = nowMs();
-    for (const entry of pendingSysex.values()) {
-        if (entry.dueAt && now >= entry.dueAt) {
-            sendSysEx(entry.msg);
-            entry.lastSent = now;
-            entry.dueAt = 0;
-        }
-    }
-}
-
-/* === Parameter Management === */
-function getParamStoreKey(scope, key, target) {
-    /* Handle object targets (e.g., { part: 0, tone: 1 }) */
-    let targetId;
-    if (target && typeof target === 'object') {
-        targetId = `${target.part ?? 0}:${target.tone ?? 0}`;
-    } else {
-        targetId = target !== undefined ? target : 0;
-    }
-    return `${scope}:${key}:${targetId}`;
-}
-
-function getParamValue(scope, key, target) {
-    const storeKey = getParamStoreKey(scope, key, target);
-    if (paramValues.has(storeKey)) return paramValues.get(storeKey);
-
-    /* Try to read from DSP/NVRAM/SRAM using parameter names */
-    let dspKey = null;
-    if (scope === 'patchCommon') {
-        /* Pass parameter name directly - DSP maps to correct NVRAM offset */
-        dspKey = `nvram_patchCommon_${key}`;
-    } else if (scope === 'tone') {
-        const toneIdx = target !== undefined ? target : 0;
-        dspKey = `nvram_tone_${toneIdx}_${key}`;
-    } else if (scope === 'partTone') {
-        const toneIdx = target?.tone ?? 0;
-        dspKey = `nvram_tone_${toneIdx}_${key}`;
-    } else if (scope === 'performanceCommon') {
-        /* Read from SRAM temp performance buffer */
-        dspKey = `sram_perfCommon_${key}`;
-    } else if (scope === 'part') {
-        /* Read from SRAM temp performance buffer - part data */
-        const partIdx = target !== undefined ? target : 0;
-        dspKey = `sram_part_${partIdx}_${key}`;
-    }
-
-    if (dspKey) {
-        const val = host_module_get_param(dspKey);
-        if (val !== null && val !== undefined) {
-            const numVal = parseInt(val);
-            if (!isNaN(numVal)) {
-                paramValues.set(storeKey, numVal);
-                return numVal;
-            }
+            std.printf("Chain params loaded: %d params\n", chainParams.length);
+        } catch (e) {
+            std.printf("Error parsing chain_params: %s\n", e);
         }
     }
 
-    return 0;
-}
-
-function setParamValueAndSend(scope, key, value, target) {
-    const storeKey = getParamStoreKey(scope, key, target);
-    const v = clampValue(value, 0, 127);
-    paramValues.set(storeKey, v);
-
-    if (scope === 'patchCommon') {
-        queueSysEx(storeKey, buildPatchCommonParam(key, v));
-    } else if (scope === 'tone') {
-        queueSysEx(storeKey, buildToneParam(target || selectedTone, key, v));
-    } else if (scope === 'performanceCommon') {
-        queueSysEx(storeKey, buildPerformanceCommonParam(key, v));
-    } else if (scope === 'part') {
-        queueSysEx(storeKey, buildPartParam(target || selectedPart, key, v));
-    } else if (scope === 'partTone') {
-        /* Part tone editing - target is { part, tone } */
-        const toneIdx = target?.tone ?? selectedTone;
-        queueSysEx(storeKey, buildToneParam(toneIdx, key, v));
-    } else if (scope === 'drum') {
-        queueSysEx(storeKey, buildDrumParam(target || 60, key, v));
+    if (hierarchy) {
+        // Start in first mode's root level
+        currentMode = hierarchy.modes ? hierarchy.modes[0] : 'patch';
+        navigateToLevel(currentMode);
+        loadingComplete = true;
     }
 }
 
-/* === LED Management === */
-function updateLEDs() {
-    updateTrackLEDs();
-    updateStepLEDs();
-    updateButtonLEDs();
-}
-
-function updateTrackLEDs() {
-    /* Track buttons control tones - only active in Patch mode */
-    for (let i = 0; i < TRACK_NOTES.length; i++) {
-        const note = TRACK_NOTES[i];
-        let color;
-        if (mode === 'performance') {
-            color = LED_OFF;
-        } else {
-            const enabled = !!toneEnabled[i];
-            const selected = selectedTone === i;
-            if (!enabled && !selected) color = LED_GREY;
-            else if (!enabled && selected) color = LED_WHITE;
-            else if (enabled && !selected) color = LED_DIM_GREEN;
-            else color = LED_BRIGHT_GREEN;
-        }
-        setLED(note, color, true);
-        setButtonLED(note, color, true);
-    }
-}
-
-function updateStepLEDs() {
-    /* Steps 1-8: Select parts in performance mode */
-    for (let i = 0; i < 8; i++) {
-        if (mode === 'performance') {
-            const enabled = !!partEnabled[i];
-            const selected = selectedPart === i;
-            let color;
-            if (!enabled && !selected) color = LED_GREY;
-            else if (!enabled && selected) color = LED_WHITE;
-            else if (enabled && !selected) color = LED_DIM_GREEN;
-            else color = LED_BRIGHT_GREEN;
-            setStepLED(i, color);
-        } else {
-            setStepLED(i, LED_OFF);
-        }
-    }
-    /* Steps 9-16: Various functions */
-    for (let i = 8; i < 16; i++) {
-        setStepLED(i, LED_OFF);
-    }
-}
-
-function updateButtonLEDs() {
-    setButtonLED(CC_MENU, uiMode === 'menu' ? LED_BRIGHT_GREEN : LED_GREY, true);
-    setButtonLED(CC_BACK, LED_GREY, true);
-    /* Capture button: lit when in performance mode */
-    setButtonLED(CC_CAPTURE, mode === 'performance' ? LED_BRIGHT_GREEN : LED_GREY, true);
-    setButtonLED(CC_MUTE, LED_GREY, true);
-}
-
-function setStepLED(index, color) {
-    const note = MoveSteps[index];
-    if (note === undefined) return;
-    setLED(note, color, true);
-}
-
-/* === Display === */
-function drawUI() {
-    if (!loadingComplete) {
-        drawLoadingScreen(loadingStatus);
+/* === Level Navigation === */
+function navigateToLevel(levelName) {
+    if (!hierarchy || !hierarchy.levels[levelName]) {
+        std.printf("Level not found: %s\n", levelName);
         return;
     }
 
-    clear_screen();
+    currentLevel = hierarchy.levels[levelName];
+    levelStack.push(levelName);
+    menuIndex = 0;
+    menuScroll = 0;
+    selectedChildIndex = 0;
+    editingParam = null;
 
-    if (uiMode === 'menu') {
-        const current = menuStack.current();
-        if (current) {
-            const footer = menuState.editing
-                ? 'Jog:Val Clk:OK Bck:Cancel'
-                : 'Jog:Sel Bck:Back';
-            drawHierarchicalMenu({
-                title: current.title,
-                items: current.items,
-                state: menuState,
-                footer
-            });
+    // If this is a list browser, load list state
+    if (currentLevel.list_param) {
+        listIndex = parseInt(host_module_get_param(currentLevel.list_param) || '0');
+        listCount = parseInt(host_module_get_param(currentLevel.count_param) || '0');
+        listName = host_module_get_param(currentLevel.name_param) || '';
+    }
+
+    // If this is an items selector, load items
+    if (currentLevel.items_param) {
+        const itemsJson = host_module_get_param(currentLevel.items_param);
+        if (itemsJson) {
+            try {
+                itemsList = JSON.parse(itemsJson);
+            } catch (e) {
+                itemsList = [];
+            }
         } else {
-            /* Stack is empty, return to browser */
-            uiMode = 'browser';
-            updateButtonLEDs();
-            drawBrowser();
+            itemsList = [];
         }
-    } else {
-        drawBrowser();
     }
 
-    /* Parameter overlay (from knob changes) */
-    drawOverlay();
+    needsRedraw = true;
+    std.printf("Navigated to level: %s\n", levelName);
+}
 
-    /* Activity overlay (from button presses etc) */
-    if (lastActivity.text && lastActivity.until > nowMs() && !isOverlayActive()) {
-        drawActivityOverlay(lastActivity.text);
+function navigateBack() {
+    if (levelStack.length > 1) {
+        levelStack.pop();
+        const prevLevel = levelStack[levelStack.length - 1];
+        levelStack.pop(); // Will be pushed again by navigateToLevel
+        navigateToLevel(prevLevel);
     }
+}
 
-    needsRedraw = false;
+function navigateToChildren() {
+    if (currentLevel && currentLevel.children) {
+        navigateToLevel(currentLevel.children);
+    }
+}
+
+/* === Mode Switching === */
+function switchMode(newMode) {
+    if (newMode !== currentMode && hierarchy.modes && hierarchy.modes.includes(newMode)) {
+        currentMode = newMode;
+        host_module_set_param('mode', currentMode === 'performance' ? '1' : '0');
+        levelStack = [];
+        navigateToLevel(currentMode);
+    }
+}
+
+/* === Parameter Handling === */
+function getParamMeta(key) {
+    return chainParamsMap[key] || { name: key, type: 'int', min: 0, max: 127 };
+}
+
+function getFullParamKey(key) {
+    // Handle child prefix (e.g., nvram_tone_0_cutofffrequency)
+    if (currentLevel.child_prefix) {
+        return currentLevel.child_prefix + selectedChildIndex + '_' + key;
+    }
+    return key;
+}
+
+function getParamValue(key) {
+    const fullKey = getFullParamKey(key);
+    const val = host_module_get_param(fullKey);
+    return parseInt(val || '0');
+}
+
+function setParamValue(key, value) {
+    const fullKey = getFullParamKey(key);
+    const meta = getParamMeta(key);
+
+    // Clamp to valid range
+    if (meta.min !== undefined) value = Math.max(meta.min, value);
+    if (meta.max !== undefined) value = Math.min(meta.max, value);
+
+    host_module_set_param(fullKey, String(value));
+    needsRedraw = true;
 }
 
 /* === Input Handling === */
 function handleCC(cc, value) {
     if (cc === CC_SHIFT) {
-        shiftHeld = value > 0;
-        return false;
-    }
-
-    /* Menu button - enter edit menu directly */
-    if (cc === CC_MENU && value > 0) {
-        if (uiMode === 'browser') {
-            uiMode = 'menu';
-            menuStack.reset();
-            menuStack.push({ title: 'Edit', items: getEditMenu() });
-            menuState.selectedIndex = 0;
-            menuState.editing = false;
-            updateButtonLEDs();
-            needsRedraw = true;
-            return true;
-        }
-        return false;
-    }
-
-    /* Menu mode input handling */
-    if (uiMode === 'menu') {
-        const current = menuStack.current();
-        if (!current) {
-            uiMode = 'browser';
-            updateButtonLEDs();
-            needsRedraw = true;
-            return true;
-        }
-
-        const result = handleMenuInput({
-            cc,
-            value,
-            items: current.items,
-            state: menuState,
-            stack: menuStack,
-            onBack: () => {
-                uiMode = 'browser';
-                updateButtonLEDs();
-            },
-            shiftHeld
-        });
-
-        if (result.needsRedraw) {
-            needsRedraw = true;
-        }
-        return true;
-    }
-
-    /* Browser mode controls */
-    if (cc === CC_JOG) {
-        const delta = decodeDelta(value);
-        if (delta !== 0) {
-            setPreset(currentPreset + delta);
-        }
-        return true;
-    }
-
-    if (cc === CC_JOG_CLICK && value > 0) {
-        /* Enter browse menu on jog click in browser */
-        uiMode = 'menu';
-        menuStack.reset();
-        if (mode === 'performance') {
-            menuStack.push({ title: 'Performances', items: getPerformancesMenu() });
-        } else {
-            menuStack.push({ title: 'Patches', items: getPatchBanksMenu() });
-        }
-        menuState.selectedIndex = 0;
-        menuState.editing = false;
-        updateButtonLEDs();
-        needsRedraw = true;
-        return true;
-    }
-
-    if (cc === CC_LEFT && value > 0) {
-        if (shiftHeld) {
-            /* Bank jump */
-            host_module_set_param('prev_bank', '1');
-            setActivity('Bank -');
-        } else {
-            setPreset(currentPreset - 1);
-        }
-        return true;
-    }
-
-    if (cc === CC_RIGHT && value > 0) {
-        if (shiftHeld) {
-            host_module_set_param('next_bank', '1');
-            setActivity('Bank +');
-        } else {
-            setPreset(currentPreset + 1);
-        }
-        return true;
-    }
-
-    if (cc === CC_CAPTURE && value > 0) {
-        /* Toggle mode in browser (capture button) */
-        setMode(mode === 'patch' ? 'performance' : 'patch');
-        return true;
-    }
-
-    /* Knob macros in browser mode */
-    const encIndex = ENCODER_CCS.indexOf(cc);
-    if (encIndex >= 0) {
-        /* Use acceleration for smooth control, shift for fine control */
-        const delta = shiftHeld ? decodeDelta(value) : decodeAcceleratedDelta(value, encIndex);
-        if (delta !== 0) {
-            const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
-            const target = mode === 'performance' ? selectedPart : selectedTone;
-            const macro = macros[encIndex];
-            if (macro) {
-                const current = getParamValue(macro.scope, macro.key, target);
-                const min = macro.min ?? 0;
-                const max = macro.max ?? 127;
-                const newVal = clamp(current + delta, min, max);
-                setParamValueAndSend(macro.scope, macro.key, newVal, target);
-                /* Use overlay for better parameter feedback */
-                showOverlay(macro.label, String(newVal));
-                needsRedraw = true;
-            }
-        }
-        return true;
-    }
-
-    /* Track buttons - always select tone (even in performance mode) */
-    if (TRACK_NOTES.includes(cc) && value > 0) {
-        /* Track buttons control tones - only available in Patch mode */
-        if (mode === 'performance') {
-            return true;
-        }
-        const trackIndex = TRACK_NOTES.indexOf(cc);
-        if (shiftHeld) {
-            /* Toggle tone enable */
-            toneEnabled[trackIndex] = toneEnabled[trackIndex] ? 0 : 1;
-            sendSysEx(buildToneParam(trackIndex, 'toneswitch', toneEnabled[trackIndex]));
-            setActivity(`Tone ${trackIndex + 1} ${toneEnabled[trackIndex] ? 'ON' : 'MUTE'}`);
-        } else {
-            selectedTone = trackIndex;
-            setActivity(`Tone ${selectedTone + 1}`);
-        }
-        updateLEDs();
-        needsRedraw = true;
-        return true;
-    }
-
-    /* Back button - return to host menu (or exit component UI in Signal Chain) */
-    if (cc === CC_BACK && value > 0) {
-        host_return_to_menu();
-        return true;
-    }
-
-    return false;
-}
-
-function handleNoteOn(note, velocity, channel, source) {
-    /* Step buttons - select part in performance mode */
-    if (MoveSteps.includes(note)) {
-        const stepIndex = note - MoveSteps[0];
-        if (mode === 'performance' && stepIndex < 8) {
-            if (shiftHeld) {
-                /* Toggle part enable */
-                partEnabled[stepIndex] = partEnabled[stepIndex] ? 0 : 1;
-                sendSysEx(buildPartParam(stepIndex, 'internalswitch', partEnabled[stepIndex]));
-                setActivity(`Part ${stepIndex + 1} ${partEnabled[stepIndex] ? 'ON' : 'MUTE'}`);
-            } else {
-                selectedPart = stepIndex;
-                host_module_set_param('part', String(selectedPart));
-                setActivity(`Part ${selectedPart + 1}`);
-            }
-            updateLEDs();
-            needsRedraw = true;
-            return true;
-        }
-    }
-
-    /* Track buttons via note - only control tones in Patch mode */
-    if (TRACK_NOTES.includes(note) && velocity > 0) {
-        if (mode === 'performance') {
-            return true;
-        }
-        const trackIndex = TRACK_NOTES.indexOf(note);
-        if (shiftHeld) {
-            toneEnabled[trackIndex] = toneEnabled[trackIndex] ? 0 : 1;
-            sendSysEx(buildToneParam(trackIndex, 'toneswitch', toneEnabled[trackIndex]));
-            setActivity(`Tone ${trackIndex + 1} ${toneEnabled[trackIndex] ? 'ON' : 'MUTE'}`);
-        } else {
-            selectedTone = trackIndex;
-            setActivity(`Tone ${selectedTone + 1}`);
-        }
-        updateLEDs();
-        needsRedraw = true;
-        return true;
-    }
-
-    /* MIDI monitor display */
-    if (velocity > 0 && (source === 'internal' || midiMonitor)) {
-        const ch = clamp(channel + 1, 1, 16);
-        const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-        const noteName = names[note % 12] + (Math.floor(note / 12) - 1);
-        setActivity(`Ch${ch} ${noteName} V${velocity}`);
-    }
-
-    return false;
-}
-
-function handleCapacitiveTouch(note, velocity) {
-    console.log('handleCapacitiveTouch: note=', note, 'vel=', velocity);
-
-    /* Touch end (note off or velocity 0) */
-    if (velocity <= 0 || velocity < 64) {
-        if (touchedKnob === note) {
-            const elapsed = globalTickCount - touchStartTick;
-            console.log('Touch end, elapsed=', elapsed, 'min=', MIN_OVERLAY_TICKS);
-            if (elapsed >= MIN_OVERLAY_TICKS) {
-                /* Minimum time passed, hide immediately */
-                hideOverlay();
-                overlayExtendUntil = 0;
-                needsRedraw = true;
-            } else {
-                /* Set extension to ensure 3 second minimum */
-                overlayExtendUntil = touchStartTick + MIN_OVERLAY_TICKS;
-                console.log('Extending overlay until tick', overlayExtendUntil);
-            }
-            touchedKnob = -1;
-        }
-        return true;
-    }
-
-    /* Touch start */
-    console.log('ENCODER_CCS.length=', ENCODER_CCS.length);
-    if (note >= 0 && note < ENCODER_CCS.length) {
-        const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
-        const target = mode === 'performance' ? selectedPart : selectedTone;
-        const macro = macros[note];
-        console.log('macro for note', note, '=', macro ? macro.label : 'none');
-        if (macro) {
-            const current = getParamValue(macro.scope, macro.key, target);
-            console.log('current value=', current, 'showing overlay');
-            showOverlay(macro.label, String(current));
-            touchedKnob = note;
-            touchStartTick = globalTickCount;
-            lastOverlayMacro = macro;
-            lastOverlayTarget = target;
-            overlayExtendUntil = 0; /* Clear any pending extension */
-            needsRedraw = true;
-        }
-        return true;
-    }
-    return false;
-}
-
-/* === DSP Sync === */
-function updateFromDSP() {
-    const complete = host_module_get_param('loading_complete');
-    if (complete) {
-        const wasLoading = !loadingComplete;
-        loadingComplete = complete === '1';
-        if (wasLoading && loadingComplete) {
-            needsRedraw = true;
-        }
-    }
-
-    const status = host_module_get_param('loading_status');
-    if (status && status !== loadingStatus) {
-        loadingStatus = status;
-        if (!loadingComplete) needsRedraw = true;
-    }
-
-    const total = host_module_get_param('total_patches');
-    if (total) {
-        const n = parseInt(total);
-        if (n > 0 && n !== totalPatches) {
-            totalPatches = n;
-            needsRedraw = true;
-        }
-    }
-
-    const banks = host_module_get_param('bank_count');
-    if (banks) {
-        const b = parseInt(banks);
-        if (b > 0 && b !== bankCount) {
-            bankCount = b;
-            needsRedraw = true;
-        }
-    }
-
-    const bank = host_module_get_param('bank_name');
-    if (bank && bank !== bankName) {
-        bankName = bank;
-        /* Reset scroll state on bank change */
-        bankScrollOffset = 0;
-        bankScrollTick = 0;
-        bankScrollPaused = false;
-        bankPauseTick = 0;
-        needsRedraw = true;
-    }
-
-    const pib = host_module_get_param('patch_in_bank');
-    if (pib) {
-        const p = parseInt(pib);
-        if (p > 0 && p !== patchInBank) {
-            patchInBank = p;
-            needsRedraw = true;
-        }
-    }
-
-    if (mode === 'performance') {
-        const perf = host_module_get_param('current_performance');
-        if (perf) {
-            const p = parseInt(perf);
-            if (p >= 0 && p !== currentPreset) {
-                currentPreset = p;
-                updateLEDs();
-                needsRedraw = true;
-            }
-        }
-    } else {
-        const patch = host_module_get_param('current_patch');
-        if (patch) {
-            const p = parseInt(patch);
-            if (p >= 0 && p !== currentPreset) {
-                currentPreset = p;
-                updateLEDs();
-                needsRedraw = true;
-            }
-        }
-    }
-
-    const name = host_module_get_param('patch_name');
-    if (name && name !== patchName) {
-        patchName = name;
-        needsRedraw = true;
-    }
-
-    const line0 = host_module_get_param('lcd_line0');
-    const line1 = host_module_get_param('lcd_line1');
-    if (line0 !== null && line0 !== lcdLine0) {
-        lcdLine0 = line0;
-        needsRedraw = true;
-    }
-    if (line1 !== null && line1 !== lcdLine1) {
-        lcdLine1 = line1;
-        needsRedraw = true;
-    }
-}
-
-/* === Required module UI callbacks === */
-
-globalThis.init = function() {
-    console.log('JV880 UI initializing (menu-driven)...');
-    setMode(mode, true);
-    updateLEDs();
-    needsRedraw = true;
-    updateFromDSP();
-};
-
-globalThis.tick = function() {
-    globalTickCount++;
-    updateFromDSP();
-    flushPendingSysEx();
-
-    /* Keep overlay visible while knob is touched */
-    if (touchedKnob >= 0) {
-        const macros = mode === 'performance' ? PERF_MACROS : PATCH_MACROS;
-        const target = mode === 'performance' ? selectedPart : selectedTone;
-        const macro = macros[touchedKnob];
-        if (macro) {
-            const current = getParamValue(macro.scope, macro.key, target);
-            showOverlay(macro.label, String(current));
-        }
-    }
-    /* Keep overlay visible during extension period (minimum 3 sec) */
-    else if (overlayExtendUntil > 0 && globalTickCount < overlayExtendUntil) {
-        if (lastOverlayMacro) {
-            const current = getParamValue(lastOverlayMacro.scope, lastOverlayMacro.key, lastOverlayTarget);
-            showOverlay(lastOverlayMacro.label, String(current));
-        }
-    }
-    /* Extension period ended */
-    else if (overlayExtendUntil > 0 && globalTickCount >= overlayExtendUntil) {
-        hideOverlay();
-        overlayExtendUntil = 0;
-        lastOverlayMacro = null;
-        lastOverlayTarget = 0;
-        needsRedraw = true;
-    }
-
-    /* Tick overlay timer (only auto-hides if not being refreshed) */
-    if (tickOverlay()) {
-        needsRedraw = true;
-    }
-
-    /* Bank name scrolling for long names (matches menu scroll behavior) */
-    const charWidth = 6;
-    const modeChars = 7;  /* "PATCH  " or "PERF   " */
-    const numChars = 5;   /* " #nnn" */
-    const maxBankChars = Math.floor(SCREEN_WIDTH / charWidth) - modeChars - numChars;
-    const maxOffset = bankName.length - maxBankChars;
-
-    if (bankName.length > maxBankChars) {
-        bankScrollTick++;
-
-        /* Handle pause at end */
-        if (bankScrollPaused) {
-            bankPauseTick++;
-            if (bankPauseTick >= BANK_SCROLL_PAUSE) {
-                /* Reset after pause */
-                bankScrollOffset = 0;
-                bankScrollPaused = false;
-                bankScrollTick = 0;
-                bankPauseTick = 0;
-                needsRedraw = true;
-            }
-        }
-        /* Wait for initial delay */
-        else if (bankScrollTick < BANK_SCROLL_DELAY) {
-            /* Still waiting */
-        }
-        /* Scroll one character per interval */
-        else if ((bankScrollTick - BANK_SCROLL_DELAY) % BANK_SCROLL_INTERVAL === 0) {
-            if (bankScrollOffset >= maxOffset) {
-                /* Reached end, start pause */
-                bankScrollPaused = true;
-                bankPauseTick = 0;
-            } else {
-                bankScrollOffset++;
-                needsRedraw = true;
-            }
-        }
-    } else {
-        /* Text fits, reset scroll state */
-        if (bankScrollOffset !== 0) {
-            bankScrollOffset = 0;
-            needsRedraw = true;
-        }
-        bankScrollTick = 0;
-        bankScrollPaused = false;
-    }
-
-    tickCount++;
-    if (needsRedraw || tickCount >= REDRAW_INTERVAL) {
-        drawUI();
-        tickCount = 0;
-        needsRedraw = false;
-    }
-};
-
-globalThis.onMidiMessageInternal = function(data) {
-    console.log('MIDI internal:', data[0].toString(16), data[1], data[2]);
-    if (isCapacitiveTouchMessage(data)) {
-        console.log('Capacitive touch detected: note=', data[1], 'vel=', data[2]);
-        handleCapacitiveTouch(data[1], data[2]);
+        shiftHeld = (value > 0);
         return;
     }
 
-    const status = data[0] & 0xF0;
-    if (status === 0xB0) {
-        if (handleCC(data[1], data[2])) return;
+    if (value === 0) return; // Button release
+
+    // Mode switching with Shift + Left/Right
+    if (shiftHeld && hierarchy.modes && hierarchy.modes.length > 1) {
+        if (cc === CC_LEFT) {
+            const idx = hierarchy.modes.indexOf(currentMode);
+            if (idx > 0) switchMode(hierarchy.modes[idx - 1]);
+            return;
+        }
+        if (cc === CC_RIGHT) {
+            const idx = hierarchy.modes.indexOf(currentMode);
+            if (idx < hierarchy.modes.length - 1) switchMode(hierarchy.modes[idx + 1]);
+            return;
+        }
     }
 
-    if (status === 0x90 && data[2] > 0) {
-        handleNoteOn(data[1], data[2], data[0] & 0x0F, 'internal');
+    // Back button
+    if (cc === CC_BACK || cc === CC_MENU) {
+        if (editingParam) {
+            editingParam = null;
+            needsRedraw = true;
+        } else {
+            navigateBack();
+        }
+        return;
     }
-};
 
-globalThis.onMidiMessageExternal = function(data) {
-    const status = data[0] & 0xF0;
-    if (status === 0x90 && data[2] > 0) {
-        handleNoteOn(data[1], data[2], data[0] & 0x0F, 'external');
+    // If editing a parameter
+    if (editingParam) {
+        handleEditingInput(cc, value);
+        return;
     }
-};
+
+    // List browser navigation (presets, performances)
+    if (currentLevel.list_param) {
+        handleListInput(cc, value);
+        return;
+    }
+
+    // Items selector navigation (expansions, user patches)
+    if (currentLevel.items_param) {
+        handleItemsInput(cc, value);
+        return;
+    }
+
+    // Child selector navigation (tones, parts)
+    if (currentLevel.child_count) {
+        handleChildSelectorInput(cc, value);
+        return;
+    }
+
+    // Menu navigation
+    handleMenuInput(cc, value);
+}
+
+function handleListInput(cc, value) {
+    const delta = (cc === CC_JOG) ? decodeDelta(value) : 0;
+
+    if (cc === CC_LEFT || delta < 0) {
+        listIndex = Math.max(0, listIndex - 1);
+        host_module_set_param(currentLevel.list_param, String(listIndex));
+        listName = host_module_get_param(currentLevel.name_param) || '';
+        needsRedraw = true;
+    } else if (cc === CC_RIGHT || delta > 0) {
+        listIndex = Math.min(listCount - 1, listIndex + 1);
+        host_module_set_param(currentLevel.list_param, String(listIndex));
+        listName = host_module_get_param(currentLevel.name_param) || '';
+        needsRedraw = true;
+    } else if (cc === CC_JOG_CLICK || cc === CC_DOWN) {
+        // Enter children or main menu
+        navigateToChildren();
+    } else if (cc === CC_UP) {
+        navigateBack();
+    }
+}
+
+function handleItemsInput(cc, value) {
+    const delta = (cc === CC_JOG) ? decodeDelta(value) : 0;
+
+    if (cc === CC_UP || delta < 0) {
+        menuIndex = Math.max(0, menuIndex - 1);
+        needsRedraw = true;
+    } else if (cc === CC_DOWN || delta > 0) {
+        menuIndex = Math.min(itemsList.length - 1, menuIndex + 1);
+        needsRedraw = true;
+    } else if (cc === CC_JOG_CLICK) {
+        // Select item
+        if (itemsList[menuIndex]) {
+            const item = itemsList[menuIndex];
+            const selectValue = item.index !== undefined ? item.index : menuIndex;
+            host_module_set_param(currentLevel.select_param, String(selectValue));
+            navigateBack();
+        }
+    }
+}
+
+function handleChildSelectorInput(cc, value) {
+    const delta = (cc === CC_JOG) ? decodeDelta(value) : 0;
+    const params = currentLevel.params || [];
+
+    if (cc === CC_LEFT) {
+        selectedChildIndex = Math.max(0, selectedChildIndex - 1);
+        needsRedraw = true;
+    } else if (cc === CC_RIGHT) {
+        selectedChildIndex = Math.min(currentLevel.child_count - 1, selectedChildIndex + 1);
+        needsRedraw = true;
+    } else if (cc === CC_UP || delta < 0) {
+        menuIndex = Math.max(0, menuIndex - 1);
+        needsRedraw = true;
+    } else if (cc === CC_DOWN || delta > 0) {
+        menuIndex = Math.min(params.length - 1, menuIndex + 1);
+        needsRedraw = true;
+    } else if (cc === CC_JOG_CLICK) {
+        // Start editing selected param
+        const paramKey = typeof params[menuIndex] === 'string' ? params[menuIndex] : params[menuIndex].key;
+        if (paramKey) {
+            editingParam = paramKey;
+            editingValue = getParamValue(paramKey);
+            needsRedraw = true;
+        }
+    }
+}
+
+function handleMenuInput(cc, value) {
+    const delta = (cc === CC_JOG) ? decodeDelta(value) : 0;
+    const params = currentLevel.params || [];
+
+    if (cc === CC_UP || delta < 0) {
+        menuIndex = Math.max(0, menuIndex - 1);
+        needsRedraw = true;
+    } else if (cc === CC_DOWN || delta > 0) {
+        menuIndex = Math.min(params.length - 1, menuIndex + 1);
+        needsRedraw = true;
+    } else if (cc === CC_JOG_CLICK) {
+        const item = params[menuIndex];
+        if (item) {
+            if (typeof item === 'string') {
+                // Simple param key - start editing
+                editingParam = item;
+                editingValue = getParamValue(item);
+            } else if (item.level) {
+                // Navigation to sublevel
+                navigateToLevel(item.level);
+            } else if (item.key) {
+                // Param with label - start editing
+                editingParam = item.key;
+                editingValue = getParamValue(item.key);
+            }
+            needsRedraw = true;
+        }
+    }
+}
+
+function handleEditingInput(cc, value) {
+    const delta = (cc === CC_JOG) ? decodeDelta(value) : 0;
+    const meta = getParamMeta(editingParam);
+
+    if (delta !== 0) {
+        const step = shiftHeld ? 10 : 1;
+        editingValue += delta * step;
+        if (meta.min !== undefined) editingValue = Math.max(meta.min, editingValue);
+        if (meta.max !== undefined) editingValue = Math.min(meta.max, editingValue);
+        setParamValue(editingParam, editingValue);
+    } else if (cc === CC_JOG_CLICK || cc === CC_BACK) {
+        editingParam = null;
+        needsRedraw = true;
+    } else if (cc === CC_LEFT) {
+        editingValue--;
+        if (meta.min !== undefined) editingValue = Math.max(meta.min, editingValue);
+        setParamValue(editingParam, editingValue);
+    } else if (cc === CC_RIGHT) {
+        editingValue++;
+        if (meta.max !== undefined) editingValue = Math.min(meta.max, editingValue);
+        setParamValue(editingParam, editingValue);
+    }
+}
+
+function handleKnob(knobIndex, delta) {
+    if (!currentLevel || !currentLevel.knobs) return;
+
+    const knobs = currentLevel.knobs;
+    if (knobIndex >= knobs.length) return;
+
+    const paramKey = knobs[knobIndex];
+    const meta = getParamMeta(paramKey);
+    let value = getParamValue(paramKey);
+
+    const step = shiftHeld ? 10 : 1;
+    value += delta * step;
+
+    setParamValue(paramKey, value);
+}
+
+/* === Drawing === */
+function draw() {
+    display.clear();
+
+    if (!loadingComplete || !hierarchy) {
+        drawLoading();
+        return;
+    }
+
+    if (currentLevel.list_param) {
+        drawListBrowser();
+    } else if (currentLevel.items_param) {
+        drawItemsSelector();
+    } else if (currentLevel.child_count) {
+        drawChildSelector();
+    } else {
+        drawMenu();
+    }
+
+    display.flush();
+}
+
+function drawLoading() {
+    const status = host_module_get_param('loading_status') || 'Loading...';
+    display.drawText(4, 28, status, 1);
+}
+
+function drawListBrowser() {
+    // Header with mode
+    const modeLabel = currentMode === 'performance' ? 'PERF' : 'PATCH';
+    display.drawText(0, 0, modeLabel, 1);
+
+    // Preset number
+    const numStr = String(listIndex + 1) + '/' + String(listCount);
+    display.drawText(SCREEN_WIDTH - numStr.length * 6, 0, numStr, 1);
+
+    // Preset name (large, centered)
+    const name = listName || '---';
+    const nameX = Math.max(0, (SCREEN_WIDTH - name.length * 6) / 2);
+    display.drawText(nameX, 24, name, 1);
+
+    // Bank name if available
+    const bankName = host_module_get_param('bank_name') || '';
+    if (bankName) {
+        const bankX = Math.max(0, (SCREEN_WIDTH - bankName.length * 6) / 2);
+        display.drawText(bankX, 12, bankName, 1);
+    }
+
+    // Footer hint
+    display.drawText(0, 56, 'Jog:Browse  Click:Menu', 1);
+}
+
+function drawItemsSelector() {
+    // Header
+    const label = currentLevel.label || 'Select';
+    display.drawText(0, 0, label, 1);
+    display.drawLine(0, 10, SCREEN_WIDTH, 10, 1);
+
+    // Items list
+    const visibleItems = 5;
+    const startIdx = Math.max(0, menuIndex - 2);
+
+    for (let i = 0; i < visibleItems && startIdx + i < itemsList.length; i++) {
+        const idx = startIdx + i;
+        const item = itemsList[idx];
+        const y = 14 + i * 10;
+        const label = item.label || item.name || `Item ${idx + 1}`;
+
+        if (idx === menuIndex) {
+            display.fillRect(0, y - 1, SCREEN_WIDTH, 10, 1);
+            display.drawText(4, y, label, 0);
+        } else {
+            display.drawText(4, y, label, 1);
+        }
+    }
+}
+
+function drawChildSelector() {
+    const t0 = Date.now();
+    // Header with child tabs
+    const label = currentLevel.child_label || 'Item';
+    for (let i = 0; i < currentLevel.child_count; i++) {
+        const x = i * 32;
+        const tabLabel = label + ' ' + (i + 1);
+        if (i === selectedChildIndex) {
+            display.fillRect(x, 0, 30, 10, 1);
+            display.drawText(x + 2, 1, tabLabel, 0);
+        } else {
+            display.drawText(x + 2, 1, tabLabel, 1);
+        }
+    }
+
+    display.drawLine(0, 11, SCREEN_WIDTH, 11, 1);
+
+    // Params list
+    const params = currentLevel.params || [];
+    const visibleItems = 5;
+    const startIdx = Math.max(0, menuIndex - 2);
+
+    let getParamTime = 0;
+    let drawTime = 0;
+
+    for (let i = 0; i < visibleItems && startIdx + i < params.length; i++) {
+        const idx = startIdx + i;
+        const param = params[idx];
+        const paramKey = typeof param === 'string' ? param : param.key;
+        const meta = getParamMeta(paramKey);
+
+        const t1 = Date.now();
+        const value = getParamValue(paramKey);
+        getParamTime += Date.now() - t1;
+
+        const y = 14 + i * 10;
+
+        const label = meta.name || paramKey;
+        const valueStr = formatValue(value, meta);
+
+        const t2 = Date.now();
+        if (idx === menuIndex) {
+            display.fillRect(0, y - 1, SCREEN_WIDTH, 10, 1);
+            display.drawText(4, y, label, 0);
+            display.drawText(SCREEN_WIDTH - valueStr.length * 6 - 4, y, valueStr, 0);
+
+            if (editingParam === paramKey) {
+                // Draw editing indicator
+                display.drawRect(SCREEN_WIDTH - valueStr.length * 6 - 6, y - 2, valueStr.length * 6 + 4, 12, 0);
+            }
+        } else {
+            display.drawText(4, y, label, 1);
+            display.drawText(SCREEN_WIDTH - valueStr.length * 6 - 4, y, valueStr, 1);
+        }
+        drawTime += Date.now() - t2;
+    }
+
+    const totalTime = Date.now() - t0;
+    if (totalTime > 5) {
+        const msg = "drawChildSelector: total=" + totalTime + "ms, getParam=" + getParamTime + "ms, draw=" + drawTime + "ms\n";
+        try {
+            const f = std.open("/tmp/jv880_ui.log", "a");
+            f.puts(msg);
+            f.close();
+        } catch(e) {}
+    }
+}
+
+function drawMenu() {
+    // Header
+    const label = currentLevel.label || 'Menu';
+    display.drawText(0, 0, label, 1);
+    display.drawLine(0, 10, SCREEN_WIDTH, 10, 1);
+
+    // Menu items
+    const params = currentLevel.params || [];
+    const visibleItems = 5;
+    const startIdx = Math.max(0, menuIndex - 2);
+
+    for (let i = 0; i < visibleItems && startIdx + i < params.length; i++) {
+        const idx = startIdx + i;
+        const item = params[idx];
+        const y = 14 + i * 10;
+
+        let label, valueStr = '';
+
+        if (typeof item === 'string') {
+            // Simple param key
+            const meta = getParamMeta(item);
+            label = meta.name || item;
+            valueStr = formatValue(getParamValue(item), meta);
+        } else if (item.level) {
+            // Navigation item
+            label = item.label + ' >';
+        } else if (item.key) {
+            // Param with label
+            const meta = getParamMeta(item.key);
+            label = item.label || meta.name || item.key;
+            valueStr = formatValue(getParamValue(item.key), meta);
+        }
+
+        if (idx === menuIndex) {
+            display.fillRect(0, y - 1, SCREEN_WIDTH, 10, 1);
+            display.drawText(4, y, label, 0);
+            if (valueStr) {
+                display.drawText(SCREEN_WIDTH - valueStr.length * 6 - 4, y, valueStr, 0);
+            }
+
+            // Editing indicator
+            const paramKey = typeof item === 'string' ? item : item.key;
+            if (editingParam === paramKey) {
+                display.drawRect(SCREEN_WIDTH - valueStr.length * 6 - 6, y - 2, valueStr.length * 6 + 4, 12, 0);
+            }
+        } else {
+            display.drawText(4, y, label, 1);
+            if (valueStr) {
+                display.drawText(SCREEN_WIDTH - valueStr.length * 6 - 4, y, valueStr, 1);
+            }
+        }
+    }
+}
+
+function formatValue(value, meta) {
+    if (meta.options) {
+        return meta.options[value] || String(value);
+    }
+    return String(value);
+}
+
+/* === Tick === */
+function tick() {
+    tickCount++;
+
+    // Retry loading hierarchy if not yet loaded
+    if (!loadingComplete && tickCount % 30 === 0) {
+        loadHierarchy();
+    }
+
+    // Refresh data periodically - ONLY for list browsers that need name updates
+    if (tickCount % 10 === 0) {
+        if (currentLevel && currentLevel.list_param) {
+            listName = host_module_get_param(currentLevel.name_param) || '';
+            needsRedraw = true;
+        }
+        // Don't force redraw for child_count levels (tone/part editing)
+        // Those only need redraw on user input
+    }
+
+    if (needsRedraw) {
+        draw();
+        needsRedraw = false;
+    }
+}
+
+/* === MIDI Handling === */
+function onMidiMessageInternal(msg) {
+    if (isCapacitiveTouchMessage(msg)) return;
+
+    if (msg.length >= 3 && (msg[0] & 0xF0) === 0xB0) {
+        const cc = msg[1];
+        const value = msg[2];
+
+        // Encoder knobs
+        const knobIdx = ENCODER_CCS.indexOf(cc);
+        if (knobIdx >= 0 && value !== 64) {
+            const delta = decodeDelta(value);
+            handleKnob(knobIdx, delta);
+            return;
+        }
+
+        handleCC(cc, value);
+    }
+}
+
+function onMidiMessageExternal(msg) {
+    // Forward external MIDI to plugin
+    host_module_send_midi(msg, 1);
+}
+
+/* === Exports === */
+globalThis.init = init;
+globalThis.tick = tick;
+globalThis.onMidiMessageInternal = onMidiMessageInternal;
+globalThis.onMidiMessageExternal = onMidiMessageExternal;

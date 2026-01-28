@@ -181,6 +181,134 @@ typedef struct {
 #define OUTPUT_GAIN_SHIFT 1  /* -6dB headroom to prevent clipping on hot patches */
 
 /* ========================================================================
+ * TONE PARAMETER LOOKUP TABLE
+ * Sorted alphabetically for binary search
+ * ======================================================================== */
+
+enum ToneParamType {
+    TP_BYTE,        /* Simple byte read/write */
+    TP_BITFIELD,    /* Bitfield within a byte */
+    TP_BOOL,        /* Boolean (On/Off) as bit */
+    TP_ENUM         /* Enum with string options */
+};
+
+typedef struct {
+    const char *name;
+    int nvram_offset;   /* Offset within tone (84 bytes) */
+    int sysex_idx;      /* SysEx parameter index */
+    enum ToneParamType type;
+    int bit_shift;      /* For bitfields: bit position */
+    int bit_mask;       /* For bitfields: mask after shift */
+    int two_byte;       /* 1 if param needs 2-byte nibblized SysEx */
+    int signed_param;   /* 1 if param is signed (needs +64 for SysEx, read as int8_t) */
+} ToneParamEntry;
+
+/* Sorted alphabetically for binary search
+ * two_byte=1 for params needing 2-byte nibblized SysEx:
+ *   wavenumber (0x01), lfo1delay (0x26), lfo2delay (0x31), pan (0x5e), tonedelaytime (0x62)
+ * signed_param=1 for params needing +64 offset in SysEx and int8_t read:
+ *   LFO depths, pitch coarse/fine, envelope depths/levels, velocity senses, pan
+ */
+static const ToneParamEntry TONE_PARAMS[] = {
+    /*                  name,                     nvram, sysex, type,        shift, mask, 2byte, signed */
+    {"chorussendlevel",                             83,   114, TP_BYTE,        0,    0,     0,     0},
+    {"cutofffrequency",                             52,    74, TP_BYTE,        0,    0,     0,     0},
+    {"cutoffkeyfollow",                             54,    77, TP_BYTE,        0,    0,     0,     0},
+    {"drylevel",                                    81,   112, TP_BYTE,        0,    0,     0,     0},
+    {"filtermode",                                  55,    73, TP_BITFIELD,    3, 0x03,     0,     0},
+    {"fxmdepth",                                     2,     5, TP_BITFIELD,    0, 0x0F,     0,     0},  /* value-1 handled specially */
+    {"fxmswitch",                                    2,     4, TP_BOOL,        7, 0x01,     0,     0},
+    {"level",                                       67,    92, TP_BYTE,        0,    0,     0,     0},
+    {"levelkeyfollow",                              70,    93, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"lfo1delay",                                   25,    38, TP_BYTE,        0,    0,     1,     0},  /* 2-byte */
+    {"lfo1fadepolarity",                            23,    40, TP_BOOL,        7, 0x01,     0,     0},
+    {"lfo1fadetime",                                26,    41, TP_BYTE,        0,    0,     0,     0},
+    {"lfo1form",                                    23,    34, TP_BITFIELD,    0, 0x07,     0,     0},
+    {"lfo1offset",                                  23,    35, TP_BITFIELD,    3, 0x07,     0,     0},
+    {"lfo1pitchdepth",                              31,    42, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"lfo1rate",                                    24,    37, TP_BYTE,        0,    0,     0,     0},
+    {"lfo1synchro",                                 23,    36, TP_BOOL,        6, 0x01,     0,     0},
+    {"lfo1tvadepth",                                33,    44, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"lfo1tvfdepth",                                32,    43, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"lfo2delay",                                   29,    49, TP_BYTE,        0,    0,     1,     0},  /* 2-byte */
+    {"lfo2fadetime",                                30,    52, TP_BYTE,        0,    0,     0,     0},
+    {"lfo2form",                                    27,    45, TP_BITFIELD,    0, 0x07,     0,     0},
+    {"lfo2pitchdepth",                              34,    53, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"lfo2rate",                                    28,    48, TP_BYTE,        0,    0,     0,     0},
+    {"lfo2tvadepth",                                36,    55, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"lfo2tvfdepth",                                35,    54, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"pan",                                         68,    94, TP_BYTE,        0,    0,     1,     2},  /* 2-byte, special: stored with +64 */
+    {"panningkeyfollow",                            39,    96, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"penvdepth",                                   43,    64, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvlevel1",                                  45,    66, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvlevel2",                                  47,    68, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvlevel3",                                  49,    70, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvlevel4",                                  51,    72, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvtime1",                                   44,    65, TP_BYTE,        0,    0,     0,     0},
+    {"penvtime2",                                   46,    67, TP_BYTE,        0,    0,     0,     0},
+    {"penvtime3",                                   48,    69, TP_BYTE,        0,    0,     0,     0},
+    {"penvtime4",                                   50,    71, TP_BYTE,        0,    0,     0,     0},
+    {"penvtimekeyfollow",                           40,    63, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"penvvelocitylevelsense",                      41,    60, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"penvvelocityofftimesense",                    42,    62, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"penvvelocityontimesense",                     42,    61, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"pitchcoarse",                                 37,    56, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"pitchfine",                                   38,    57, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"pitchkeyfollow",                              40,    59, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"randompitchdepth",                            39,    58, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"resonance",                                   53,    75, TP_BYTE,        0,    0,     0,     0},
+    {"resonancemode",                               53,    76, TP_BOOL,        7, 0x01,     0,     0},
+    {"reverbsendlevel",                             82,   113, TP_BYTE,        0,    0,     0,     0},
+    {"tonedelaymode",                               71,    97, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"tonedelaytime",                               69,    98, TP_BYTE,        0,    0,     1,     0},  /* 2-byte */
+    {"toneswitch",                                   0,     3, TP_BOOL,        7, 0x01,     0,     0},
+    {"tvaenvlevel1",                                75,   106, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvlevel2",                                77,   108, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvlevel3",                                79,   110, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvtime1",                                 74,   105, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvtime2",                                 76,   107, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvtime3",                                 78,   109, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvtime4",                                 80,   111, TP_BYTE,        0,    0,     0,     0},
+    {"tvaenvtimekeyfollow",                         70,   104, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"tvaenvvelocitycurve",                         71,   100, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"tvaenvvelocitylevelsense",                    72,   101, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"tvaenvvelocityofftimesense",                  73,   103, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"tvaenvvelocityontimesense",                   73,   102, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"tvfenvdepth",                                 58,    83, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"tvfenvlevel1",                                60,    85, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvlevel2",                                62,    87, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvlevel3",                                64,    89, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvlevel4",                                66,    91, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvtime1",                                 59,    84, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvtime2",                                 61,    86, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvtime3",                                 63,    88, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvtime4",                                 65,    90, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvtimekeyfollow",                         54,    82, TP_BYTE,        0,    0,     0,     0},
+    {"tvfenvvelocitycurve",                         55,    78, TP_BITFIELD,    0, 0x07,     0,     0},
+    {"tvfenvvelocitylevelsense",                    56,    79, TP_BYTE,        0,    0,     0,     1},  /* signed */
+    {"tvfenvvelocityofftimesense",                  57,    81, TP_BITFIELD,    4, 0x0F,     0,     0},
+    {"tvfenvvelocityontimesense",                   57,    80, TP_BITFIELD,    0, 0x0F,     0,     0},
+    {"velocityrangelower",                           3,     6, TP_BYTE,        0,    0,     0,     0},
+    {"velocityrangeupper",                           4,     7, TP_BYTE,        0,    0,     0,     0},
+    {"wavegroup",                                    0,     0, TP_BITFIELD,    0, 0x03,     0,     0},
+    {"wavenumber",                                   1,     1, TP_BYTE,        0,    0,     1,     0},  /* 2-byte */
+};
+#define NUM_TONE_PARAMS (sizeof(TONE_PARAMS) / sizeof(TONE_PARAMS[0]))
+
+/* Binary search for tone param */
+static const ToneParamEntry* find_tone_param(const char *name) {
+    int lo = 0, hi = NUM_TONE_PARAMS - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        int cmp = strcmp(name, TONE_PARAMS[mid].name);
+        if (cmp == 0) return &TONE_PARAMS[mid];
+        if (cmp < 0) hi = mid - 1;
+        else lo = mid + 1;
+    }
+    return NULL;
+}
+
+/* ========================================================================
  * SHARED HELPER FUNCTIONS
  * ======================================================================== */
 
@@ -293,6 +421,13 @@ typedef struct {
     int pending_perf_select;   /* Countdown to select performance after mode switch */
     int pending_patch_select;  /* Countdown to select patch after mode switch */
     volatile int warmup_remaining;  /* Warmup cycles remaining after reset */
+
+    /* Part patch bank selection: 0=User, 1=Internal, 2=PresetA, 3=PresetB */
+    int part_patchbank[8];
+
+    /* Save/load slot browser indices */
+    int save_slot_index;
+    int load_slot_index;
 
     /* Resampling state (libresample) */
     void *resampleL;
@@ -491,7 +626,21 @@ static int v2_scan_expansion_rom(jv880_instance_t *inst, const char *filename, E
     info->rom_size = rom_size;
     info->unscrambled = unscrambled_data;
 
-    fprintf(stderr, "JV880 v2: Scanned %s: %d patches\n", info->name, patch_count);
+    /* Debug: show header bytes and first patch preview */
+    fprintf(stderr, "JV880 v2: Scanned %s: %d patches at offset 0x%x\n",
+            info->name, patch_count, patches_offset);
+    fprintf(stderr, "JV880 v2: Header bytes 0x66-0x67: %02X %02X, 0x8c-0x8f: %02X %02X %02X %02X\n",
+            unscrambled_data[0x66], unscrambled_data[0x67],
+            unscrambled_data[0x8c], unscrambled_data[0x8d],
+            unscrambled_data[0x8e], unscrambled_data[0x8f]);
+
+    /* Check first patch at patches_offset */
+    char first_patch_name[13];
+    memcpy(first_patch_name, &unscrambled_data[patches_offset], 12);
+    first_patch_name[12] = '\0';
+    fprintf(stderr, "JV880 v2: First patch at 0x%x: name='%s', byte26=0x%02X\n",
+            patches_offset, first_patch_name, unscrambled_data[patches_offset + 26]);
+
     return 1;
 }
 
@@ -670,13 +819,61 @@ static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index)
     if (exp_index == inst->current_expansion) return;
 
     v2_send_all_notes_off(inst);
+
+    /* Load waveform data to expansion waverom */
     memset(inst->mcu->pcm.waverom_exp, 0, EXPANSION_SIZE_8MB);
     memcpy(inst->mcu->pcm.waverom_exp, exp->unscrambled, exp->rom_size);
 
+    /* Load patch definitions to cardram for Card patches (64-127 in Performance mode)
+     * The JV-880 looks for Card patch data in cardram when a part uses patchnumber 64-127.
+     * Copy up to 64 patches from the expansion's patch area. */
+    memset(inst->mcu->cardram, 0, CARDRAM_SIZE);
+    int patches_to_copy = (exp->patch_count > 64) ? 64 : exp->patch_count;
+    int bytes_to_copy = patches_to_copy * PATCH_SIZE;
+    if (bytes_to_copy > CARDRAM_SIZE) bytes_to_copy = CARDRAM_SIZE;
+    memcpy(inst->mcu->cardram, &exp->unscrambled[exp->patches_offset], bytes_to_copy);
+
+    /* Debug: show what we copied */
+    jv_debug("[JV880] Expansion load: patches_offset=0x%x, patch_count=%d\n",
+             exp->patches_offset, exp->patch_count);
+
+    /* Show first patch's structure */
+    uint8_t *p0 = inst->mcu->cardram;
+    char name[13];
+    memcpy(name, p0, 12);
+    name[12] = '\0';
+    jv_debug("[JV880] cardram patch 0: name='%s'\n", name);
+    jv_debug("[JV880] cardram patch 0: bytes 0-15: %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X\n",
+             p0[0], p0[1], p0[2], p0[3], p0[4], p0[5], p0[6], p0[7],
+             p0[8], p0[9], p0[10], p0[11], p0[12], p0[13], p0[14], p0[15]);
+    jv_debug("[JV880] cardram patch 0: bytes 16-31: %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X\n",
+             p0[16], p0[17], p0[18], p0[19], p0[20], p0[21], p0[22], p0[23],
+             p0[24], p0[25], p0[26], p0[27], p0[28], p0[29], p0[30], p0[31]);
+    /* Tone 0 starts at offset 26. Show wavegroup and wavenumber */
+    jv_debug("[JV880] cardram patch 0 tone0: wavegroup=%d wavenumber=%d,%d (at offsets 26,27,28)\n",
+             p0[26], p0[27], p0[28]);
+
+    /* Also show what's at those same offsets in the expansion ROM directly */
+    uint8_t *rom_p0 = &exp->unscrambled[exp->patches_offset];
+    jv_debug("[JV880] ROM patch 0: bytes 0-15: %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X\n",
+             rom_p0[0], rom_p0[1], rom_p0[2], rom_p0[3], rom_p0[4], rom_p0[5], rom_p0[6], rom_p0[7],
+             rom_p0[8], rom_p0[9], rom_p0[10], rom_p0[11], rom_p0[12], rom_p0[13], rom_p0[14], rom_p0[15]);
+
+    fprintf(stderr, "JV880 v2: Copied %d patches (%d bytes) to cardram\n",
+            patches_to_copy, bytes_to_copy);
+
     inst->current_expansion = exp_index;
-    inst->mcu->SC55_Reset();
-    inst->warmup_remaining = 50000;  /* Warmup after expansion change */
-    fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator, starting warmup\n", exp->name);
+
+    /* In Performance mode, don't reset - just load the ROM data.
+     * The expansion waveforms will be available for Card patches.
+     * In Patch mode, reset to ensure the new expansion is properly initialized. */
+    if (!inst->performance_mode) {
+        inst->mcu->SC55_Reset();
+        inst->warmup_remaining = 50000;  /* Warmup after expansion change */
+        fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator (with reset)\n", exp->name);
+    } else {
+        fprintf(stderr, "JV880 v2: Loaded expansion %s for Card patches (no reset)\n", exp->name);
+    }
 }
 
 /* v2: Select a patch */
@@ -981,6 +1178,11 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
         return NULL;
     }
 
+    /* Initialize part_patchbank to -1 (uninitialized) so we derive from SRAM on first access */
+    for (int i = 0; i < 8; i++) {
+        inst->part_patchbank[i] = -1;
+    }
+
     strncpy(inst->module_dir, module_dir, sizeof(inst->module_dir) - 1);
     fprintf(stderr, "JV880 v2: Loading from %s\n", module_dir);
 
@@ -1247,30 +1449,58 @@ static void* v2_emu_thread_func(void *arg) {
     return NULL;
 }
 
-/* v2: Helper to queue SysEx for tone parameter changes */
-static void v2_queue_tone_sysex(jv880_instance_t *inst, int toneIdx, int paramIdx, int value) {
+/* v2: Helper to queue SysEx for tone parameter changes
+ * two_byte: if true, sends nibblized 2-byte data (high nibble, low nibble)
+ *           used for wavenumber, lfo delay, pan, tone delay time
+ */
+static void v2_queue_tone_sysex(jv880_instance_t *inst, int toneIdx, int paramIdx, int value, int two_byte) {
     if (!inst || toneIdx < 0 || toneIdx > 3) return;
 
-    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data checksum F7 */
+    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data... checksum F7 */
     uint8_t addr[4] = { 0x00, 0x08, (uint8_t)(0x28 + toneIdx), (uint8_t)paramIdx };
-    uint8_t data = (uint8_t)(value & 0x7F);
 
-    /* Calculate checksum: 128 - (sum of addr + data) mod 128 */
-    int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
-    uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+    if (two_byte) {
+        /* 2-byte nibblized format: high nibble then low nibble */
+        uint8_t data_hi = (uint8_t)((value >> 4) & 0x0F);
+        uint8_t data_lo = (uint8_t)(value & 0x0F);
 
-    uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
-                          addr[0], addr[1], addr[2], addr[3],
-                          data, chk, 0xF7 };
+        /* Calculate checksum */
+        int sum = addr[0] + addr[1] + addr[2] + addr[3] + data_hi + data_lo;
+        uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
 
-    /* Queue the SysEx */
-    int write_idx = inst->midi_write;
-    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
-    if (next == inst->midi_read) return; /* Queue full */
+        uint8_t sysex[13] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                              addr[0], addr[1], addr[2], addr[3],
+                              data_hi, data_lo, chk, 0xF7 };
 
-    memcpy(inst->midi_queue[write_idx], sysex, 12);
-    inst->midi_queue_len[write_idx] = 12;
-    inst->midi_write = next;
+        /* Queue the SysEx */
+        int write_idx = inst->midi_write;
+        int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+        if (next == inst->midi_read) return; /* Queue full */
+
+        memcpy(inst->midi_queue[write_idx], sysex, 13);
+        inst->midi_queue_len[write_idx] = 13;
+        inst->midi_write = next;
+    } else {
+        /* Standard 1-byte format */
+        uint8_t data = (uint8_t)(value & 0x7F);
+
+        /* Calculate checksum: 128 - (sum of addr + data) mod 128 */
+        int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
+        uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+
+        uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                              addr[0], addr[1], addr[2], addr[3],
+                              data, chk, 0xF7 };
+
+        /* Queue the SysEx */
+        int write_idx = inst->midi_write;
+        int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+        if (next == inst->midi_read) return; /* Queue full */
+
+        memcpy(inst->midi_queue[write_idx], sysex, 12);
+        inst->midi_queue_len[write_idx] = 12;
+        inst->midi_write = next;
+    }
 }
 
 /* v2: Helper to queue SysEx for patch common parameter changes */
@@ -1299,31 +1529,64 @@ static void v2_queue_patch_common_sysex(jv880_instance_t *inst, int paramIdx, in
     inst->midi_write = next;
 }
 
-/* v2: Helper to queue SysEx for part parameter changes */
-static void v2_queue_part_sysex(jv880_instance_t *inst, int partIdx, int paramIdx, int value) {
+/* v2: Helper to queue SysEx for part parameter changes
+ * two_byte: if true, sends MSB/LSB format (for 0-255 range params like patchnumber)
+ *           MSB = (value >> 7) & 0x7F, LSB = value & 0x7F
+ */
+static void v2_queue_part_sysex(jv880_instance_t *inst, int partIdx, int paramIdx, int value, int two_byte) {
     if (!inst || partIdx < 0 || partIdx > 7) return;
 
-    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data checksum F7 */
+    /* Build Roland DT1 SysEx: F0 41 10 46 12 addr[4] data... checksum F7 */
     /* Part address: [0x00, 0x00, 0x18 + partIdx, paramIdx] */
     uint8_t addr[4] = { 0x00, 0x00, (uint8_t)(0x18 + partIdx), (uint8_t)paramIdx };
-    uint8_t data = (uint8_t)(value & 0x7F);
 
-    /* Calculate checksum */
-    int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
-    uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+    if (two_byte) {
+        /* 2-byte nibblized format for 0-255 range (e.g., patchnumber)
+         * Per Roland SysEx spec: high nibble at addr, low nibble at addr+1 */
+        uint8_t data_high = (uint8_t)((value >> 4) & 0x0F);
+        uint8_t data_low = (uint8_t)(value & 0x0F);
 
-    uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
-                          addr[0], addr[1], addr[2], addr[3],
-                          data, chk, 0xF7 };
+        /* Calculate checksum */
+        int sum = addr[0] + addr[1] + addr[2] + addr[3] + data_high + data_low;
+        uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
 
-    /* Queue the SysEx */
-    int write_idx = inst->midi_write;
-    int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
-    if (next == inst->midi_read) return;
+        uint8_t sysex[13] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                              addr[0], addr[1], addr[2], addr[3],
+                              data_high, data_low, chk, 0xF7 };
 
-    memcpy(inst->midi_queue[write_idx], sysex, 12);
-    inst->midi_queue_len[write_idx] = 12;
-    inst->midi_write = next;
+        /* Queue the SysEx */
+        int write_idx = inst->midi_write;
+        int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+        if (next == inst->midi_read) return; /* Queue full */
+
+        memcpy(inst->midi_queue[write_idx], sysex, 13);
+        inst->midi_queue_len[write_idx] = 13;
+        inst->midi_write = next;
+        jv_debug("[JV880] Part%d SysEx: addr=%02X.%02X.%02X.%02X data=%02X.%02X (value=%d)\n",
+                partIdx, addr[0], addr[1], addr[2], addr[3], data_high, data_low, value);
+    } else {
+        /* Standard 1-byte format */
+        uint8_t data = (uint8_t)(value & 0x7F);
+
+        /* Calculate checksum */
+        int sum = addr[0] + addr[1] + addr[2] + addr[3] + data;
+        uint8_t chk = (128 - (sum & 0x7F)) & 0x7F;
+
+        uint8_t sysex[12] = { 0xF0, 0x41, 0x10, 0x46, 0x12,
+                              addr[0], addr[1], addr[2], addr[3],
+                              data, chk, 0xF7 };
+
+        /* Queue the SysEx */
+        int write_idx = inst->midi_write;
+        int next = (write_idx + 1) % MIDI_QUEUE_SIZE;
+        if (next == inst->midi_read) return;
+
+        memcpy(inst->midi_queue[write_idx], sysex, 12);
+        inst->midi_queue_len[write_idx] = 12;
+        inst->midi_write = next;
+        jv_debug("[JV880] Part%d SysEx: addr=%02X.%02X.%02X.%02X data=%02X (value=%d)\n",
+                partIdx, addr[0], addr[1], addr[2], addr[3], data, value);
+    }
 }
 
 /* v2: MIDI handler */
@@ -1671,7 +1934,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (bank_offset < 0) bank_offset = 0;
             if (bank_offset > max_offset) bank_offset = max_offset;
             inst->expansion_bank_offset = bank_offset;
-            inst->current_expansion = exp_idx;
+            /* Actually load the expansion ROM into the emulator */
+            v2_load_expansion_to_emulator(inst, exp_idx);
             fprintf(stderr, "JV880 v2: Loaded expansion %d (%s) at bank offset %d\n",
                     exp_idx, inst->expansions[exp_idx].name, bank_offset);
         }
@@ -1718,55 +1982,82 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             v2_queue_patch_common_sysex(inst, sysexIdx, v);
         }
     } else if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
+        /* Optimized tone param set using binary search lookup */
         int toneIdx = atoi(key + 11);
         const char *underscore = strchr(key + 11, '_');
         if (underscore && toneIdx >= 0 && toneIdx < 4) {
             const char *paramName = underscore + 1;
-            int nvramOffset = -1;
-            int sysexIdx = -1;
+            const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
 
-            /* Map parameter names to NVRAM offset and SysEx index (they differ!)
-             * Offsets verified against jv880_juce dataStructures.h Tone struct */
-            /* NVRAM offsets from jv880_juce Tone struct (84 bytes total) */
-            if (strcmp(paramName, "cutofffrequency") == 0) { nvramOffset = 52; sysexIdx = 74; }  /* tvfCutoff */
-            else if (strcmp(paramName, "resonance") == 0) { nvramOffset = 53; sysexIdx = 75; }   /* tvfResonance */
-            else if (strcmp(paramName, "level") == 0) { nvramOffset = 67; sysexIdx = 92; }       /* tvaLevel at 67 */
-            else if (strcmp(paramName, "pan") == 0) { nvramOffset = 68; sysexIdx = 94; }         /* tvaPan at 68 */
-            else if (strcmp(paramName, "pitchcoarse") == 0) { nvramOffset = 37; sysexIdx = 56; } /* pitchCoarse */
-            else if (strcmp(paramName, "pitchfine") == 0) { nvramOffset = 38; sysexIdx = 57; }   /* pitchFine */
-            else if (strcmp(paramName, "tvaenvtime1") == 0) { nvramOffset = 74; sysexIdx = 105; }  /* tvaEnvTime1 */
-            else if (strcmp(paramName, "tvaenvtime2") == 0) { nvramOffset = 76; sysexIdx = 107; }  /* tvaEnvTime2 */
-            else if (strcmp(paramName, "tvaenvtime3") == 0) { nvramOffset = 78; sysexIdx = 109; }  /* tvaEnvTime3 */
-            else if (strcmp(paramName, "tvaenvtime4") == 0) { nvramOffset = 80; sysexIdx = 111; }  /* tvaEnvTime4 */
-            else if (strcmp(paramName, "drylevel") == 0) { nvramOffset = 81; sysexIdx = 112; }     /* drySend */
-            else if (strcmp(paramName, "reverbsendlevel") == 0) { nvramOffset = 82; sysexIdx = 113; } /* reverbSend */
-            else if (strcmp(paramName, "chorussendlevel") == 0) { nvramOffset = 83; sysexIdx = 114; } /* chorusSend */
-
-            /* Handle filter mode specially - it's bits 3-4 of byte 55 (tvfVeloCurveLpfHpf)
-             * Accepts: "Off", "LPF", "HPF" or numeric 0, 1, 2 */
-            if (strcmp(paramName, "filtermode") == 0) {
+            const ToneParamEntry *p = find_tone_param(paramName);
+            if (p) {
+                uint8_t *b = &inst->mcu->nvram[toneBase + p->nvram_offset];
                 int v;
-                if (strcmp(val, "Off") == 0) v = 0;
-                else if (strcmp(val, "LPF") == 0) v = 1;
-                else if (strcmp(val, "HPF") == 0) v = 2;
-                else v = clamp_int(atoi(val), 0, 2);
-                const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
-                const int byteOffset = 55;  /* tvfVeloCurveLpfHpf */
-                uint8_t *byte = &inst->mcu->nvram[toneBase + byteOffset];
-                /* Clear bits 3-4 and set new filter mode */
-                *byte = (*byte & ~0x18) | ((v & 0x03) << 3);
-                /* SysEx index 0x49 (73) for filter mode per JV-880 MIDI Implementation */
-                v2_queue_tone_sysex(inst, toneIdx, 0x49, v);
-                return;
-            }
+                int sysex_val;
 
-            if (nvramOffset >= 0 && sysexIdx >= 0) {
-                const int v = clamp_int(atoi(val), 0, 127);
-                const int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
-                /* Update NVRAM directly for immediate UI feedback */
-                inst->mcu->nvram[toneBase + nvramOffset] = (uint8_t)v;
-                /* Send SysEx to emulator for actual sound change */
-                v2_queue_tone_sysex(inst, toneIdx, sysexIdx, v);
+                switch (p->type) {
+                    case TP_BYTE:
+                        if (p->signed_param == 1) {
+                            /* Signed param: accept negative values, add 64 for SysEx */
+                            v = clamp_int(atoi(val), -63, 63);
+                            *b = (uint8_t)(int8_t)v;  /* Store as signed byte */
+                            sysex_val = v + 64;      /* Add offset for SysEx */
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, sysex_val, p->two_byte);
+                        } else if (p->signed_param == 2) {
+                            /* Pan special case: stored with +64 offset */
+                            v = clamp_int(atoi(val), -64, 63);
+                            sysex_val = v + 64;      /* -64 to +63 becomes 0 to 127 */
+                            *b = (uint8_t)sysex_val; /* Store with offset */
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, sysex_val, p->two_byte);
+                        } else {
+                            /* Unsigned param */
+                            v = clamp_int(atoi(val), 0, 127);
+                            *b = (uint8_t)v;
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                        }
+                        return;
+
+                    case TP_BITFIELD:
+                        v = clamp_int(atoi(val), 0, p->bit_mask);
+                        *b = (*b & ~(p->bit_mask << p->bit_shift)) | ((v & p->bit_mask) << p->bit_shift);
+                        /* FXM depth special case: SysEx wants value-1 (1-16 becomes 0-15) */
+                        if (strcmp(paramName, "fxmdepth") == 0 && v > 0) {
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v - 1, p->two_byte);
+                        } else {
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                        }
+                        return;
+
+                    case TP_BOOL:
+                        v = (strcmp(val, "On") == 0 || atoi(val)) ? 1 : 0;
+                        if (v) *b |= (1 << p->bit_shift);
+                        else *b &= ~(1 << p->bit_shift);
+                        v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                        return;
+
+                    case TP_ENUM:
+                        /* Special handling for specific enums */
+                        if (strcmp(paramName, "filtermode") == 0) {
+                            if (strcmp(val, "Off") == 0) v = 0;
+                            else if (strcmp(val, "LPF") == 0) v = 1;
+                            else if (strcmp(val, "HPF") == 0) v = 2;
+                            else v = clamp_int(atoi(val), 0, 2);
+                            *b = (*b & ~(p->bit_mask << p->bit_shift)) | ((v & p->bit_mask) << p->bit_shift);
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                            return;
+                        }
+                        if (strcmp(paramName, "resonancemode") == 0) {
+                            v = (strcmp(val, "Hard") == 0 || atoi(val)) ? 1 : 0;
+                            if (v) *b |= 0x80; else *b &= ~0x80;
+                            v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                            return;
+                        }
+                        /* Default enum handling */
+                        v = clamp_int(atoi(val), 0, p->bit_mask);
+                        *b = (*b & ~(p->bit_mask << p->bit_shift)) | ((v & p->bit_mask) << p->bit_shift);
+                        v2_queue_tone_sysex(inst, toneIdx, p->sysex_idx, v, p->two_byte);
+                        return;
+                }
             }
         }
     } else if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
@@ -1785,21 +2076,90 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             else if (strcmp(paramName, "internalvelocitysense") == 0) { sramOffset = 13; sysexIdx = 18; }
             else if (strcmp(paramName, "internalvelocitymax") == 0) { sramOffset = 14; sysexIdx = 19; }
 
-            /* Handle patchnumber specially - it's 0-255, uses dual bytes in SysEx
-             * Per JV-880 MIDI Implementation: offset 0x17, range 0-255
-             * Values > 127 use nibblized format: 0000 bbbb at addr, 0bbb bbbb at addr+1
-             * This sends the value as two consecutive bytes */
+            /* Handle patchbank - selects which bank patchnumber refers to
+             * Accepts: "User", "Internal", "Preset A", "Preset B" or numeric 0-3
+             * Also triggers patch load at current index from new bank
+             * Note: "Card" bank removed - expansion waveforms accessed via User patches */
+            if (strcmp(paramName, "patchbank") == 0) {
+                int bank;
+                if (strcmp(val, "User") == 0) bank = 0;
+                else if (strcmp(val, "Internal") == 0) bank = 1;
+                else if (strcmp(val, "Preset A") == 0) bank = 2;
+                else if (strcmp(val, "Preset B") == 0) bank = 3;
+                else bank = clamp_int(atoi(val), 0, 3);
+                inst->part_patchbank[partIdx] = bank;
+                jv_debug("[JV880] Part %d patchbank set to %s (%d)\n", partIdx + 1, val, bank);
+
+                /* Get current patch index (0-63) and load from new bank */
+                int currentPatch = inst->mcu->sram[partBase + 16];
+                int patchInBank = currentPatch % 64;
+                int actualPatchNum;
+
+                switch (bank) {
+                    case 0:  /* User - copy user patch to temp area for playback */
+                        if (inst->mcu && patchInBank < NUM_USER_PATCHES) {
+                            uint32_t src = NVRAM_PATCH_INTERNAL + (patchInBank * PATCH_SIZE);
+                            if (inst->mcu->nvram[src] != 0xFF) {
+                                uint32_t dest = patchInBank * PATCH_SIZE;
+                                if (dest + PATCH_SIZE <= CARDRAM_SIZE) {
+                                    memcpy(&inst->mcu->cardram[dest],
+                                           &inst->mcu->nvram[src], PATCH_SIZE);
+                                }
+                            }
+                        }
+                        actualPatchNum = 64 + patchInBank;  /* Use cardram range */
+                        break;
+                    case 1: actualPatchNum = patchInBank; break;         /* Internal: 0-63 */
+                    case 2: actualPatchNum = 128 + patchInBank; break;   /* Preset A: 128-191 */
+                    case 3: actualPatchNum = 192 + patchInBank; break;   /* Preset B: 192-255 */
+                    default: actualPatchNum = patchInBank; break;
+                }
+
+                jv_debug("[JV880] Part %d loading patch %d from bank %d (actual: %d)\n",
+                        partIdx + 1, patchInBank, bank, actualPatchNum);
+
+                inst->mcu->sram[partBase + 16] = (uint8_t)actualPatchNum;
+                v2_queue_part_sysex(inst, partIdx, 0x17, actualPatchNum, 1);
+                return;
+            }
+
+            /* Handle patchnumber - 0-63 within selected bank
+             * Combined with patchbank to determine actual patch */
             if (strcmp(paramName, "patchnumber") == 0) {
-                const int v = clamp_int(atoi(val), 0, 255);
-                inst->mcu->sram[partBase + 16] = (uint8_t)v;
-                /* Send as nibblized dual bytes: MSB nibble at 0x17, LSB at 0x18 */
-                int msb = (v >> 4) & 0x0F;  /* High nibble */
-                int lsb = v & 0x7F;         /* Low 7 bits (but only need low nibble for < 256) */
-                /* Actually for 0-255, we need: byte1 = v/128, byte2 = v%128 */
-                msb = v >> 7;    /* 0 or 1 for 0-255 range */
-                lsb = v & 0x7F;  /* 0-127 */
-                v2_queue_part_sysex(inst, partIdx, 0x17, msb);  /* MSB */
-                v2_queue_part_sysex(inst, partIdx, 0x18, lsb);  /* LSB */
+                int patchInBank = clamp_int(atoi(val), 0, 63);
+                int bank = inst->part_patchbank[partIdx];
+                int actualPatchNum;
+
+                switch (bank) {
+                    case 0:  /* User - copy user patch to cardram for playback */
+                        if (inst->mcu && patchInBank < NUM_USER_PATCHES) {
+                            uint32_t src = NVRAM_PATCH_INTERNAL + (patchInBank * PATCH_SIZE);
+                            if (inst->mcu->nvram[src] != 0xFF) {
+                                uint32_t dest = patchInBank * PATCH_SIZE;
+                                if (dest + PATCH_SIZE <= CARDRAM_SIZE) {
+                                    memcpy(&inst->mcu->cardram[dest],
+                                           &inst->mcu->nvram[src], PATCH_SIZE);
+                                }
+                            }
+                        }
+                        actualPatchNum = 64 + patchInBank;  /* Use cardram range */
+                        break;
+                    case 1:  /* Internal: 0-63 */
+                        actualPatchNum = patchInBank;
+                        break;
+                    case 2:  /* Preset A: 128-191 */
+                        actualPatchNum = 128 + patchInBank;
+                        break;
+                    case 3:  /* Preset B: 192-255 */
+                        actualPatchNum = 192 + patchInBank;
+                        break;
+                    default:
+                        actualPatchNum = patchInBank;
+                        break;
+                }
+
+                inst->mcu->sram[partBase + 16] = (uint8_t)actualPatchNum;
+                v2_queue_part_sysex(inst, partIdx, 0x17, actualPatchNum, 1);
                 return;
             }
 
@@ -1813,7 +2173,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
                 if (v) *b |= 0x40;
                 else *b &= ~0x40;
-                v2_queue_part_sysex(inst, partIdx, 29, v);
+                v2_queue_part_sysex(inst, partIdx, 29, v, 0);
                 return;
             }
             if (strcmp(paramName, "chorusswitch") == 0) {
@@ -1824,7 +2184,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 uint8_t *b = &inst->mcu->sram[partBase + 21];
                 if (v) *b |= 0x20;
                 else *b &= ~0x20;
-                v2_queue_part_sysex(inst, partIdx, 30, v);
+                v2_queue_part_sysex(inst, partIdx, 30, v, 0);
                 return;
             }
 
@@ -1844,7 +2204,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 } else {
                     inst->mcu->sram[partBase + sramOffset] = (uint8_t)v;
                 }
-                v2_queue_part_sysex(inst, partIdx, sysexIdx, v);
+                v2_queue_part_sysex(inst, partIdx, sysexIdx, v, 0);
             }
         }
     } else if (strncmp(key, "write_patch_", 12) == 0 && inst->mcu) {
@@ -1892,8 +2252,101 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         } else {
             fprintf(stderr, "JV880 v2: Failed to save NVRAM to %s\n", path);
         }
+    } else if (strncmp(key, "save_to_slot_", 13) == 0 && inst->mcu) {
+        /* Save current working patch to user slot 1-8 (menu items) */
+        int slot = atoi(key + 13) - 1;  /* Convert 1-8 to 0-7 */
+        if (slot >= 0 && slot < 8) {
+            uint32_t dest_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            memcpy(&inst->mcu->nvram[dest_offset],
+                   &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            memcpy(name, &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_NAME_LEN);
+            name[PATCH_NAME_LEN] = '\0';
+            fprintf(stderr, "JV880 v2: Saved patch '%s' to User slot %d\n", name, slot + 1);
+            /* Auto-save NVRAM to persist */
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/roms/jv880_nvram.bin", inst->module_dir);
+            FILE* f = fopen(path, "wb");
+            if (f) {
+                fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
+                fclose(f);
+            }
+        }
+    } else if (strcmp(key, "save_to_user_slot") == 0 && inst->mcu) {
+        /* Save current working patch to user slot (0-63) - for UI menu */
+        int slot = atoi(val);
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t dest_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            memcpy(&inst->mcu->nvram[dest_offset],
+                   &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            memcpy(name, &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_NAME_LEN);
+            name[PATCH_NAME_LEN] = '\0';
+            fprintf(stderr, "JV880 v2: Saved patch '%s' to User slot %d\n", name, slot + 1);
+            /* Auto-save NVRAM to persist */
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/roms/jv880_nvram.bin", inst->module_dir);
+            FILE* f = fopen(path, "wb");
+            if (f) {
+                fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
+                fclose(f);
+            }
+        }
+    } else if (strcmp(key, "save_slot") == 0 && inst->mcu) {
+        /* Save slot browser - selecting a slot saves current patch there */
+        int slot = atoi(val);
+        inst->save_slot_index = slot;
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t dest_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            memcpy(&inst->mcu->nvram[dest_offset],
+                   &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            memcpy(name, &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_NAME_LEN);
+            name[PATCH_NAME_LEN] = '\0';
+            fprintf(stderr, "JV880 v2: Saved patch '%s' to User slot %d\n", name, slot + 1);
+            /* Auto-save NVRAM to persist */
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/roms/jv880_nvram.bin", inst->module_dir);
+            FILE* f = fopen(path, "wb");
+            if (f) {
+                fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
+                fclose(f);
+            }
+        }
+    } else if (strcmp(key, "load_slot") == 0 && inst->mcu) {
+        /* Load slot browser - selecting a slot loads that patch */
+        int slot = atoi(val);
+        inst->load_slot_index = slot;
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t src_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            if (inst->mcu->nvram[src_offset] != 0xFF) {
+                /* Copy user patch to working patch area */
+                memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET],
+                       &inst->mcu->nvram[src_offset], PATCH_SIZE);
+                char name[PATCH_NAME_LEN + 1];
+                memcpy(name, &inst->mcu->nvram[src_offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                fprintf(stderr, "JV880 v2: Loaded user patch '%s' from slot %d\n", name, slot + 1);
+
+                /* Ensure patch mode in NVRAM (like v2_select_patch does) */
+                inst->mcu->nvram[NVRAM_MODE_OFFSET] = 1;
+
+                /* Trigger emulator to reload patch via PC 0 */
+                uint8_t pc_msg[2] = { 0xC0, 0x00 };
+                pthread_mutex_lock(&inst->ring_mutex);
+                int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+                if (next != inst->midi_read) {
+                    memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
+                    inst->midi_queue_len[inst->midi_write] = 2;
+                    inst->midi_write = next;
+                }
+                pthread_mutex_unlock(&inst->ring_mutex);
+            } else {
+                fprintf(stderr, "JV880 v2: User patch slot %d is empty\n", slot + 1);
+            }
+        }
     } else if (strcmp(key, "load_user_patch") == 0 && inst->mcu) {
-        /* Load a user patch from NVRAM into working area */
+        /* Load a user patch from NVRAM into working area (legacy) */
         int slot = atoi(val);
         if (slot >= 0 && slot < NUM_USER_PATCHES) {
             uint32_t src_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
@@ -1989,10 +2442,163 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     }
 }
 
+/* Tone param cache - avoid hitting NVRAM on every poll */
+#define TONE_CACHE_SIZE (4 * 84)  /* 4 tones × 84 bytes each */
+static uint8_t tone_cache[TONE_CACHE_SIZE];
+static uint64_t tone_cache_valid = 0;  /* Timestamp when cache was filled */
+#define TONE_CACHE_TTL_MS 50  /* Refresh cache every 50ms */
+
+static uint64_t get_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
 /* v2: Get parameter */
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     jv880_instance_t *inst = (jv880_instance_t*)instance;
     if (!inst) return -1;
+
+    /* Fast path for frequently-accessed tone params - uses cache to avoid NVRAM reads */
+    if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
+        int toneIdx = atoi(key + 11);
+        const char* underscore = strchr(key + 11, '_');
+        if (underscore && toneIdx >= 0 && toneIdx < 4) {
+            const char* paramName = underscore + 1;
+
+            /* Refresh cache if stale */
+            uint64_t now = get_time_ms();
+            if (now - tone_cache_valid > TONE_CACHE_TTL_MS) {
+                int nvramBase = NVRAM_PATCH_OFFSET + 26;
+                memcpy(tone_cache, &inst->mcu->nvram[nvramBase], TONE_CACHE_SIZE);
+                tone_cache_valid = now;
+            }
+
+            const ToneParamEntry *p = find_tone_param(paramName);
+            if (p) {
+                int cacheOffset = (toneIdx * 84) + p->nvram_offset;
+                uint8_t byte = tone_cache[cacheOffset];
+                switch (p->type) {
+                    case TP_BYTE:
+                        if (p->signed_param == 1) {
+                            /* Signed param: read as int8_t for proper sign extension */
+                            return snprintf(buf, buf_len, "%d", (int)(int8_t)byte);
+                        } else if (p->signed_param == 2) {
+                            /* Pan special case: stored with +64 offset, display as -64 to +63 */
+                            return snprintf(buf, buf_len, "%d", (int)byte - 64);
+                        } else {
+                            return snprintf(buf, buf_len, "%d", byte);
+                        }
+                    case TP_BITFIELD:
+                        /* FXM depth special case: stored 0-15, display 1-16 */
+                        if (strcmp(paramName, "fxmdepth") == 0) {
+                            return snprintf(buf, buf_len, "%d", ((byte >> p->bit_shift) & p->bit_mask) + 1);
+                        }
+                        return snprintf(buf, buf_len, "%d", (byte >> p->bit_shift) & p->bit_mask);
+                    case TP_BOOL:
+                        return snprintf(buf, buf_len, "%s", (byte & (1 << p->bit_shift)) ? "On" : "Off");
+                    case TP_ENUM:
+                        /* Special handling for filtermode and resonancemode */
+                        if (strcmp(paramName, "filtermode") == 0) {
+                            int v = (byte >> p->bit_shift) & p->bit_mask;
+                            const char *labels[] = {"Off", "LPF", "HPF"};
+                            return snprintf(buf, buf_len, "%s", labels[v < 3 ? v : 0]);
+                        }
+                        if (strcmp(paramName, "resonancemode") == 0) {
+                            return snprintf(buf, buf_len, "%s", (byte & 0x80) ? "Hard" : "Soft");
+                        }
+                        return snprintf(buf, buf_len, "%d", (byte >> p->bit_shift) & p->bit_mask);
+                }
+            }
+        }
+    }
+
+    /* Fast path for sram_part_ params (performance mode editing) */
+    if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
+        int partIdx = key[10] - '0';
+        if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
+            const char* paramName = key + 12;
+            int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
+            int offset = -1;
+
+            /* Handle patchbank - return stored value, derive from SRAM only if uninitialized (-1) */
+            if (strcmp(paramName, "patchbank") == 0) {
+                static const char *bank_names[] = {"User", "Internal", "Preset A", "Preset B"};
+                int bank = inst->part_patchbank[partIdx];
+
+                /* If not yet initialized, derive from actual patch number */
+                if (bank < 0 || bank > 3) {
+                    int actualPatch = inst->mcu->sram[partBase + 16];
+                    if (actualPatch < 64) bank = 1;        /* Internal */
+                    else if (actualPatch < 128) bank = 0;  /* User (via cardram) */
+                    else if (actualPatch < 192) bank = 2;  /* Preset A */
+                    else bank = 3;                         /* Preset B */
+                    inst->part_patchbank[partIdx] = bank;
+                }
+                return snprintf(buf, buf_len, "%s", bank_names[bank]);
+            }
+
+            /* Handle patchnumber - return 0-63 within selected bank */
+            if (strcmp(paramName, "patchnumber") == 0) {
+                int actualPatch = inst->mcu->sram[partBase + 16];
+                int patchInBank = actualPatch % 64;  /* Extract 0-63 within bank */
+                return snprintf(buf, buf_len, "%d", patchInBank);
+            }
+
+            /* Direct storage parameters */
+            if (strcmp(paramName, "partlevel") == 0) offset = 17;
+            else if (strcmp(paramName, "partpan") == 0) offset = 18;
+            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
+            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
+
+            /* Handle reverbswitch and chorusswitch as bit fields */
+            if (strcmp(paramName, "reverbswitch") == 0) {
+                uint8_t b = inst->mcu->sram[partBase + 21];
+                return snprintf(buf, buf_len, "%s", ((b >> 6) & 1) ? "On" : "Off");
+            }
+            if (strcmp(paramName, "chorusswitch") == 0) {
+                uint8_t b = inst->mcu->sram[partBase + 21];
+                return snprintf(buf, buf_len, "%s", ((b >> 5) & 1) ? "On" : "Off");
+            }
+
+            /* Signed offset parameters */
+            if (strcmp(paramName, "partcoarsetune") == 0 ||
+                strcmp(paramName, "partfinetune") == 0 ||
+                strcmp(paramName, "internalkeytranspose") == 0) {
+                if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
+                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
+                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
+                if (offset >= 0) {
+                    int8_t stored = (int8_t)inst->mcu->sram[partBase + offset];
+                    int val = stored + 64;
+                    return snprintf(buf, buf_len, "%d", val);
+                }
+            }
+
+            if (offset >= 0) {
+                return snprintf(buf, buf_len, "%d", inst->mcu->sram[partBase + offset]);
+            }
+        }
+    }
+
+    /* Fast path for nvram_patchCommon_ params */
+    if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
+        const char* paramName = key + 18;
+        int offset = -1;
+
+        if (strcmp(paramName, "patchlevel") == 0) offset = 21;
+        else if (strcmp(paramName, "patchpan") == 0) offset = 22;
+        else if (strcmp(paramName, "reverblevel") == 0) offset = 13;
+        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
+        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
+        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
+        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
+        else if (strcmp(paramName, "analogfeel") == 0) offset = 20;
+
+        if (offset >= 0) {
+            return snprintf(buf, buf_len, "%d", inst->mcu->nvram[NVRAM_PATCH_OFFSET + offset]);
+        }
+    }
 
     if (strcmp(key, "preset_name") == 0 || strcmp(key, "patch_name") == 0 || strcmp(key, "name") == 0) {
         if (!inst->loading_complete) {
@@ -2159,6 +2765,29 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         written += snprintf(buf + written, buf_len - written, "]");
         return written;
     }
+    /* Patchbank list for part bank selection (no Card - expansion waveforms via User patches) */
+    if (strcmp(key, "patchbank_list") == 0) {
+        return snprintf(buf, buf_len,
+            "[{\"index\":0,\"name\":\"User\"},"
+            "{\"index\":1,\"name\":\"Internal\"},"
+            "{\"index\":2,\"name\":\"Preset A\"},"
+            "{\"index\":3,\"name\":\"Preset B\"}]");
+    }
+    /* Card expansion list for Performance mode - only actual expansions, no factory */
+    if (strcmp(key, "card_expansion_list") == 0) {
+        if (inst->expansion_count == 0) {
+            return snprintf(buf, buf_len, "[{\"index\":-1,\"name\":\"No expansions found\"}]");
+        }
+        int written = snprintf(buf, buf_len, "[");
+        for (int i = 0; i < inst->expansion_count && written < buf_len - 100; i++) {
+            if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
+            written += snprintf(buf + written, buf_len - written,
+                "{\"index\":%d,\"name\":\"%s\",\"patch_count\":%d}",
+                i, inst->expansions[i].name, inst->expansions[i].patch_count);
+        }
+        written += snprintf(buf + written, buf_len - written, "]");
+        return written;
+    }
     /* User patch list for "Load User Patch" menu - returns JSON array of saved patches */
     if (strcmp(key, "user_patch_list") == 0 && inst->mcu) {
         int written = snprintf(buf, buf_len, "[");
@@ -2180,6 +2809,86 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         }
         written += snprintf(buf + written, buf_len - written, "]");
         return written;
+    }
+    /* Save patch slot list - shows all 64 slots for saving */
+    if (strcmp(key, "save_patch_slot_list") == 0) {
+        if (!inst->mcu) {
+            return snprintf(buf, buf_len, "[{\"index\":0,\"name\":\"Loading...\"}]");
+        }
+        int written = snprintf(buf, buf_len, "[");
+        for (int i = 0; i < NUM_USER_PATCHES && written < buf_len - 100; i++) {
+            uint32_t offset = NVRAM_PATCH_INTERNAL + (i * PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            /* Check if slot has valid data */
+            if (inst->mcu->nvram[offset] != 0xFF) {
+                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                int len = PATCH_NAME_LEN;
+                while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == 0)) len--;
+                name[len] = '\0';
+            } else {
+                strcpy(name, "(empty)");
+            }
+            if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
+            written += snprintf(buf + written, buf_len - written,
+                "{\"index\":%d,\"name\":\"%02d: %s\"}", i, i + 1, name);
+        }
+        written += snprintf(buf + written, buf_len - written, "]");
+        return written;
+    }
+    /* Save slot current index */
+    if (strcmp(key, "save_slot") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->save_slot_index);
+    }
+    /* Save slot count for browser */
+    if (strcmp(key, "save_slot_count") == 0) {
+        return snprintf(buf, buf_len, "%d", NUM_USER_PATCHES);
+    }
+    /* Save slot name for browser */
+    if (strcmp(key, "save_slot_name") == 0 && inst->mcu) {
+        int idx = inst->save_slot_index;
+        if (idx >= 0 && idx < NUM_USER_PATCHES) {
+            uint32_t offset = NVRAM_PATCH_INTERNAL + (idx * PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            if (inst->mcu->nvram[offset] != 0xFF) {
+                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                int len = PATCH_NAME_LEN;
+                while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == 0)) len--;
+                name[len] = '\0';
+            } else {
+                strcpy(name, "(empty)");
+            }
+            return snprintf(buf, buf_len, "%02d: %s", idx + 1, name);
+        }
+        return snprintf(buf, buf_len, "01: (empty)");
+    }
+    /* Load slot current index */
+    if (strcmp(key, "load_slot") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->load_slot_index);
+    }
+    /* Load slot count for browser */
+    if (strcmp(key, "load_slot_count") == 0) {
+        return snprintf(buf, buf_len, "%d", NUM_USER_PATCHES);
+    }
+    /* Load slot name for browser */
+    if (strcmp(key, "load_slot_name") == 0 && inst->mcu) {
+        int idx = inst->load_slot_index;
+        if (idx >= 0 && idx < NUM_USER_PATCHES) {
+            uint32_t offset = NVRAM_PATCH_INTERNAL + (idx * PATCH_SIZE);
+            char name[PATCH_NAME_LEN + 1];
+            if (inst->mcu->nvram[offset] != 0xFF) {
+                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                int len = PATCH_NAME_LEN;
+                while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == 0)) len--;
+                name[len] = '\0';
+            } else {
+                strcpy(name, "(empty)");
+            }
+            return snprintf(buf, buf_len, "%02d: %s", idx + 1, name);
+        }
+        return snprintf(buf, buf_len, "01: (empty)");
     }
     /* User patch info: user_patch_<idx>_name */
     if (strncmp(key, "user_patch_", 11) == 0 && inst->mcu) {
@@ -2233,119 +2942,6 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "---");
     }
 
-    /* Hierarchical parameter getters for Shadow UI
-     * These read the same memory locations as v1 API but use instance pointer
-     */
-
-    /* Read tone parameter: nvram_tone_<toneIdx>_<paramName> */
-    if (strncmp(key, "nvram_tone_", 11) == 0 && inst->mcu) {
-        int toneIdx = atoi(key + 11);
-        const char* underscore = strchr(key + 11, '_');
-        if (underscore && toneIdx >= 0 && toneIdx < 4) {
-            const char* paramName = underscore + 1;
-            int toneBase = NVRAM_PATCH_OFFSET + 26 + (toneIdx * 84);
-            int offset = -1;
-
-            /* Map parameter names to NVRAM offsets within tone
-             * Offsets verified against jv880_juce dataStructures.h Tone struct */
-            if (strcmp(paramName, "cutofffrequency") == 0) offset = 52;
-            else if (strcmp(paramName, "resonance") == 0) offset = 53;
-            else if (strcmp(paramName, "level") == 0) offset = 68;       /* tvaLevel at 68 */
-            else if (strcmp(paramName, "pan") == 0) offset = 69;         /* tvaPan at 69 */
-            else if (strcmp(paramName, "pitchcoarse") == 0) offset = 37;
-            else if (strcmp(paramName, "pitchfine") == 0) offset = 38;
-            /* TVA section offsets from jv880_juce struct */
-            else if (strcmp(paramName, "level") == 0) offset = 67;       /* tvaLevel */
-            else if (strcmp(paramName, "pan") == 0) offset = 68;         /* tvaPan */
-            else if (strcmp(paramName, "tvaenvtime1") == 0) offset = 74; /* tvaEnvTime1 */
-            else if (strcmp(paramName, "tvaenvtime2") == 0) offset = 76; /* tvaEnvTime2 */
-            else if (strcmp(paramName, "tvaenvtime3") == 0) offset = 78; /* tvaEnvTime3 */
-            else if (strcmp(paramName, "tvaenvtime4") == 0) offset = 80; /* tvaEnvTime4 */
-            else if (strcmp(paramName, "drylevel") == 0) offset = 81;    /* drySend */
-            else if (strcmp(paramName, "reverbsendlevel") == 0) offset = 82; /* reverbSend */
-            else if (strcmp(paramName, "chorussendlevel") == 0) offset = 83; /* chorusSend */
-
-            /* Handle filter mode specially - bits 3-4 of byte 55
-             * Returns: "Off", "LPF", or "HPF" */
-            if (strcmp(paramName, "filtermode") == 0) {
-                uint8_t byte = inst->mcu->nvram[toneBase + 55];
-                int filterMode = (byte >> 3) & 0x03;
-                const char *labels[] = {"Off", "LPF", "HPF"};
-                return snprintf(buf, buf_len, "%s", labels[filterMode < 3 ? filterMode : 0]);
-            }
-
-            if (offset >= 0 && offset < 85) {  /* Increased from 84 to 85 for chorusSend */
-                uint8_t val = inst->mcu->nvram[toneBase + offset];
-                return snprintf(buf, buf_len, "%d", val);
-            }
-        }
-    }
-
-    /* Read patch common parameter: nvram_patchCommon_<paramName> */
-    if (strncmp(key, "nvram_patchCommon_", 18) == 0 && inst->mcu) {
-        const char* paramName = key + 18;
-        int offset = -1;
-
-        if (strcmp(paramName, "patchlevel") == 0) offset = 21;
-        else if (strcmp(paramName, "patchpan") == 0) offset = 22;
-        else if (strcmp(paramName, "analogfeel") == 0) offset = 20;
-        else if (strcmp(paramName, "reverblevel") == 0) offset = 13;
-        else if (strcmp(paramName, "reverbtime") == 0) offset = 14;
-        else if (strcmp(paramName, "choruslevel") == 0) offset = 16;
-        else if (strcmp(paramName, "chorusdepth") == 0) offset = 17;
-        else if (strcmp(paramName, "chorusrate") == 0) offset = 18;
-
-        if (offset >= 0 && offset < 26) {
-            uint8_t val = inst->mcu->nvram[NVRAM_PATCH_OFFSET + offset];
-            return snprintf(buf, buf_len, "%d", val);
-        }
-    }
-
-    /* Read part parameter: sram_part_<partIdx>_<paramName> */
-    if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
-        int partIdx = key[10] - '0';
-        if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
-            const char* paramName = key + 12;
-            int partBase = SRAM_TEMP_PERF_OFFSET + TEMP_PERF_COMMON_SIZE + (partIdx * TEMP_PERF_PART_SIZE);
-            int offset = -1;
-
-            /* Direct storage parameters */
-            if (strcmp(paramName, "partlevel") == 0) offset = 17;
-            else if (strcmp(paramName, "partpan") == 0) offset = 18;
-            else if (strcmp(paramName, "patchnumber") == 0) offset = 16;
-            else if (strcmp(paramName, "internalkeyrangelower") == 0) offset = 10;
-            else if (strcmp(paramName, "internalkeyrangeupper") == 0) offset = 11;
-
-            /* Handle reverbswitch and chorusswitch as bit fields - return "Off" or "On" */
-            if (strcmp(paramName, "reverbswitch") == 0) {
-                uint8_t b = inst->mcu->sram[partBase + 21];
-                return snprintf(buf, buf_len, "%s", ((b >> 6) & 1) ? "On" : "Off");
-            }
-            if (strcmp(paramName, "chorusswitch") == 0) {
-                uint8_t b = inst->mcu->sram[partBase + 21];
-                return snprintf(buf, buf_len, "%s", ((b >> 5) & 1) ? "On" : "Off");
-            }
-
-            /* Signed offset parameters: stored = (val-64), read = (stored+64) */
-            if (strcmp(paramName, "partcoarsetune") == 0 ||
-                strcmp(paramName, "partfinetune") == 0 ||
-                strcmp(paramName, "internalkeytranspose") == 0) {
-                if (strcmp(paramName, "partcoarsetune") == 0) offset = 19;
-                else if (strcmp(paramName, "partfinetune") == 0) offset = 20;
-                else if (strcmp(paramName, "internalkeytranspose") == 0) offset = 12;
-                if (offset >= 0) {
-                    int8_t stored = (int8_t)inst->mcu->sram[partBase + offset];
-                    int val = stored + 64;
-                    return snprintf(buf, buf_len, "%d", val);
-                }
-            }
-
-            if (offset >= 0) {
-                return snprintf(buf, buf_len, "%d", inst->mcu->sram[partBase + offset]);
-            }
-        }
-    }
-
     /* UI hierarchy for shadow parameter editor
      * JV-880 has two modes: patch and performance
      * - Patch mode: browse patches → tones (1-4) → tone params
@@ -2375,8 +2971,9 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"params\":["
                         "{\"level\":\"tone_selector\",\"label\":\"Edit Tones\"},"
                         "{\"level\":\"patch_common\",\"label\":\"Common Settings\"},"
-                        "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"},"
-                        "{\"level\":\"user_patches\",\"label\":\"User Patches\"}"
+                        "{\"level\":\"save_patch\",\"label\":\"Save Patch\"},"
+                        "{\"level\":\"user_patches\",\"label\":\"Load User Patch\"},"
+                        "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"}"
                     "]"
                 "},"
                 "\"patch_common\":{"
@@ -2401,8 +2998,22 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_prefix\":\"nvram_tone_\","
                     "\"child_count\":4,"
                     "\"child_label\":\"Tone\","
-                    "\"knobs\":[\"cutofffrequency\",\"resonance\",\"filtermode\",\"level\",\"pan\",\"tvaenvtime1\",\"tvaenvtime2\",\"reverbsendlevel\"],"
-                    "\"params\":[\"cutofffrequency\",\"resonance\",\"filtermode\",\"level\",\"pan\",\"pitchcoarse\",\"pitchfine\",\"tvaenvtime1\",\"tvaenvtime2\",\"tvaenvtime3\",\"tvaenvtime4\",\"drylevel\",\"reverbsendlevel\",\"chorussendlevel\"]"
+                    "\"knobs\":[\"level\",\"pan\",\"cutofffrequency\",\"resonance\",\"lfo1pitchdepth\",\"lfo1tvfdepth\",\"tvaenvtime1\",\"tvaenvtime2\"],"
+                    "\"params\":["
+                        "\"toneswitch\",\"wavegroup\",\"wavenumber\","
+                        "\"level\",\"pan\",\"levelkeyfollow\",\"panningkeyfollow\","
+                        "\"cutofffrequency\",\"resonance\",\"filtermode\",\"resonancemode\",\"cutoffkeyfollow\","
+                        "\"pitchcoarse\",\"pitchfine\",\"randompitchdepth\",\"pitchkeyfollow\","
+                        "\"lfo1form\",\"lfo1rate\",\"lfo1delay\",\"lfo1pitchdepth\",\"lfo1tvfdepth\",\"lfo1tvadepth\","
+                        "\"lfo2form\",\"lfo2rate\",\"lfo2delay\",\"lfo2pitchdepth\",\"lfo2tvfdepth\",\"lfo2tvadepth\","
+                        "\"penvdepth\",\"penvtime1\",\"penvlevel1\",\"penvtime2\",\"penvlevel2\",\"penvtime3\",\"penvlevel3\",\"penvtime4\",\"penvlevel4\","
+                        "\"tvfenvdepth\",\"tvfenvtime1\",\"tvfenvlevel1\",\"tvfenvtime2\",\"tvfenvlevel2\",\"tvfenvtime3\",\"tvfenvlevel3\",\"tvfenvtime4\",\"tvfenvlevel4\","
+                        "\"tvaenvtime1\",\"tvaenvlevel1\",\"tvaenvtime2\",\"tvaenvlevel2\",\"tvaenvtime3\",\"tvaenvlevel3\",\"tvaenvtime4\","
+                        "\"velocityrangelower\",\"velocityrangeupper\","
+                        "\"tonedelaymode\",\"tonedelaytime\","
+                        "\"fxmswitch\",\"fxmdepth\","
+                        "\"drylevel\",\"reverbsendlevel\",\"chorussendlevel\""
+                    "]"
                 "},"
                 "\"performance\":{"
                     "\"list_param\":\"performance\","
@@ -2418,8 +3029,17 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"knobs\":[\"octave_transpose\"],"
                     "\"params\":["
                         "{\"level\":\"part_selector\",\"label\":\"Edit Parts\"},"
+                        "{\"level\":\"load_expansion\",\"label\":\"Load Expansion\"},"
                         "{\"key\":\"octave_transpose\",\"label\":\"Octave\"}"
                     "]"
+                "},"
+                "\"load_expansion\":{"
+                    "\"label\":\"Load Expansion\","
+                    "\"items_param\":\"expansion_list\","
+                    "\"select_param\":\"load_expansion\","
+                    "\"children\":null,"
+                    "\"knobs\":[],"
+                    "\"params\":[]"
                 "},"
                 "\"part_selector\":{"
                     "\"label\":\"Parts\","
@@ -2428,7 +3048,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_count\":8,"
                     "\"child_label\":\"Part\","
                     "\"knobs\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\"],"
-                    "\"params\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"patchnumber\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
+                    "\"params\":[\"patchbank\",\"patchnumber\",\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
                 "},"
                 "\"expansions\":{"
                     "\"label\":\"Jump to Expansion\","
@@ -2438,11 +3058,27 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"knobs\":[],"
                     "\"params\":[]"
                 "},"
-                "\"user_patches\":{"
-                    "\"label\":\"User Patches\","
-                    "\"items_param\":\"user_patch_list\","
-                    "\"select_param\":\"load_user_patch\","
+                "\"save_patch\":{"
+                    "\"label\":\"Save to User Slot\","
                     "\"children\":null,"
+                    "\"knobs\":[],"
+                    "\"params\":["
+                        "{\"key\":\"save_to_slot_1\",\"label\":\"Slot 01\"},"
+                        "{\"key\":\"save_to_slot_2\",\"label\":\"Slot 02\"},"
+                        "{\"key\":\"save_to_slot_3\",\"label\":\"Slot 03\"},"
+                        "{\"key\":\"save_to_slot_4\",\"label\":\"Slot 04\"},"
+                        "{\"key\":\"save_to_slot_5\",\"label\":\"Slot 05\"},"
+                        "{\"key\":\"save_to_slot_6\",\"label\":\"Slot 06\"},"
+                        "{\"key\":\"save_to_slot_7\",\"label\":\"Slot 07\"},"
+                        "{\"key\":\"save_to_slot_8\",\"label\":\"Slot 08\"}"
+                    "]"
+                "},"
+                "\"user_patches\":{"
+                    "\"label\":\"Load User Patch\","
+                    "\"list_param\":\"load_slot\","
+                    "\"count_param\":\"load_slot_count\","
+                    "\"name_param\":\"load_slot_name\","
+                    "\"children\":\"patch_main\","
                     "\"knobs\":[],"
                     "\"params\":[]"
                 "}"
@@ -2473,25 +3109,85 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"key\":\"nvram_patchCommon_chorusdepth\",\"name\":\"Chorus Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusrate\",\"name\":\"Chorus Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_analogfeel\",\"name\":\"Analog Feel\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            /* Tone params (suffix only - child_prefix adds nvram_tone_N_) */
+            /* Tone params - Wave */
+            "{\"key\":\"toneswitch\",\"name\":\"Tone Switch\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
+            "{\"key\":\"wavegroup\",\"name\":\"Wave Group\",\"type\":\"int\",\"min\":0,\"max\":3},"
+            "{\"key\":\"wavenumber\",\"name\":\"Wave Number\",\"type\":\"int\",\"min\":0,\"max\":255},"
+            /* Tone params - Level/Pan */
+            "{\"key\":\"level\",\"name\":\"Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"pan\",\"name\":\"Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"levelkeyfollow\",\"name\":\"Level KF\",\"type\":\"int\",\"min\":0,\"max\":15},"
+            "{\"key\":\"panningkeyfollow\",\"name\":\"Pan KF\",\"type\":\"int\",\"min\":0,\"max\":15},"
+            /* Tone params - Filter */
             "{\"key\":\"cutofffrequency\",\"name\":\"Cutoff\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"filtermode\",\"name\":\"Filter Mode\",\"type\":\"enum\",\"options\":[\"Off\",\"LPF\",\"HPF\"]},"
-            "{\"key\":\"level\",\"name\":\"Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"pan\",\"name\":\"Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"resonancemode\",\"name\":\"Reso Mode\",\"type\":\"enum\",\"options\":[\"Soft\",\"Hard\"]},"
+            "{\"key\":\"cutoffkeyfollow\",\"name\":\"Cutoff KF\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - Pitch */
             "{\"key\":\"pitchcoarse\",\"name\":\"Pitch Coarse\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"pitchfine\",\"name\":\"Pitch Fine\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"tvaenvtime1\",\"name\":\"Attack\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"tvaenvtime2\",\"name\":\"Decay\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"tvaenvtime3\",\"name\":\"Sustain\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"tvaenvtime4\",\"name\":\"Release\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"randompitchdepth\",\"name\":\"Random Pitch\",\"type\":\"int\",\"min\":0,\"max\":7},"
+            "{\"key\":\"pitchkeyfollow\",\"name\":\"Pitch KF\",\"type\":\"int\",\"min\":0,\"max\":15},"
+            /* Tone params - LFO1 */
+            "{\"key\":\"lfo1form\",\"name\":\"LFO1 Wave\",\"type\":\"int\",\"min\":0,\"max\":5},"
+            "{\"key\":\"lfo1rate\",\"name\":\"LFO1 Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo1delay\",\"name\":\"LFO1 Delay\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo1pitchdepth\",\"name\":\"LFO1 Pitch\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo1tvfdepth\",\"name\":\"LFO1 Filter\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo1tvadepth\",\"name\":\"LFO1 Amp\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - LFO2 */
+            "{\"key\":\"lfo2form\",\"name\":\"LFO2 Wave\",\"type\":\"int\",\"min\":0,\"max\":5},"
+            "{\"key\":\"lfo2rate\",\"name\":\"LFO2 Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo2delay\",\"name\":\"LFO2 Delay\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo2pitchdepth\",\"name\":\"LFO2 Pitch\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo2tvfdepth\",\"name\":\"LFO2 Filter\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"lfo2tvadepth\",\"name\":\"LFO2 Amp\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - Pitch Envelope */
+            "{\"key\":\"penvdepth\",\"name\":\"P.Env Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvtime1\",\"name\":\"P.Env T1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvlevel1\",\"name\":\"P.Env L1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvtime2\",\"name\":\"P.Env T2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvlevel2\",\"name\":\"P.Env L2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvtime3\",\"name\":\"P.Env T3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvlevel3\",\"name\":\"P.Env L3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvtime4\",\"name\":\"P.Env T4\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"penvlevel4\",\"name\":\"P.Env L4\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - Filter Envelope */
+            "{\"key\":\"tvfenvdepth\",\"name\":\"F.Env Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvtime1\",\"name\":\"F.Env T1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvlevel1\",\"name\":\"F.Env L1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvtime2\",\"name\":\"F.Env T2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvlevel2\",\"name\":\"F.Env L2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvtime3\",\"name\":\"F.Env T3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvlevel3\",\"name\":\"F.Env L3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvtime4\",\"name\":\"F.Env T4\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvfenvlevel4\",\"name\":\"F.Env L4\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - Amp Envelope */
+            "{\"key\":\"tvaenvtime1\",\"name\":\"A.Env T1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvlevel1\",\"name\":\"A.Env L1\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime2\",\"name\":\"A.Env T2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvlevel2\",\"name\":\"A.Env L2\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime3\",\"name\":\"A.Env T3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvlevel3\",\"name\":\"A.Env L3\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"tvaenvtime4\",\"name\":\"A.Env T4\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - Velocity/Delay */
+            "{\"key\":\"velocityrangelower\",\"name\":\"Vel Lo\",\"type\":\"int\",\"min\":1,\"max\":127},"
+            "{\"key\":\"velocityrangeupper\",\"name\":\"Vel Hi\",\"type\":\"int\",\"min\":1,\"max\":127},"
+            "{\"key\":\"tonedelaymode\",\"name\":\"Delay Mode\",\"type\":\"int\",\"min\":0,\"max\":3},"
+            "{\"key\":\"tonedelaytime\",\"name\":\"Delay Time\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            /* Tone params - FXM */
+            "{\"key\":\"fxmswitch\",\"name\":\"FXM\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
+            "{\"key\":\"fxmdepth\",\"name\":\"FXM Depth\",\"type\":\"int\",\"min\":0,\"max\":15},"
+            /* Tone params - Output */
             "{\"key\":\"drylevel\",\"name\":\"Dry Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"reverbsendlevel\",\"name\":\"Reverb Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"chorussendlevel\",\"name\":\"Chorus Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
             /* Part params (suffix only - child_prefix adds sram_part_N_) */
+            "{\"key\":\"patchbank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[\"User\",\"Internal\",\"Preset A\",\"Preset B\"]},"
             "{\"key\":\"partlevel\",\"name\":\"Part Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"partpan\",\"name\":\"Part Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"patchnumber\",\"name\":\"Patch\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"patchnumber\",\"name\":\"Patch\",\"type\":\"int\",\"min\":0,\"max\":63},"
             "{\"key\":\"reverbswitch\",\"name\":\"Reverb\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
             "{\"key\":\"chorusswitch\",\"name\":\"Chorus\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]},"
             "{\"key\":\"partcoarsetune\",\"name\":\"Coarse Tune\",\"type\":\"int\",\"min\":16,\"max\":112},"
@@ -2551,7 +3247,7 @@ static void v2_render_block(void *instance, int16_t *out, int frames) {
     /* Pad with silence if underrun */
     if (to_read < frames) {
         inst->underrun_count++;
-        fprintf(stderr, "JV880: UNDERRUN #%d: needed %d, had %d (min_level=%d, renders=%d)\n",
+        jv_debug("[JV880] UNDERRUN #%d: needed %d, had %d (min_level=%d, renders=%d)\n",
                 inst->underrun_count, frames, avail, inst->min_buffer_level, inst->render_count);
         inst->min_buffer_level = 9999;  /* Reset for next period */
     }
@@ -2601,6 +3297,6 @@ static plugin_api_v2_t jv880_api_v2 = {
 /* v2 Entry Point */
 extern "C" plugin_api_v2_t* move_plugin_init_v2(const host_api_v1_t *host) {
     (void)host;
-    fprintf(stderr, "JV880: v2 API initialized\n");
+    jv_debug("[JV880] v2 API initialized\n");
     return &jv880_api_v2;
 }
