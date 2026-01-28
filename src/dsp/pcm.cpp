@@ -37,9 +37,7 @@
 #include "mcu.h"
 #include "pcm.h"
 
-Pcm::Pcm(MCU *mcu): mcu(mcu) {
-    pthread_spin_init(&pcm_lock, PTHREAD_PROCESS_PRIVATE);
-}
+Pcm::Pcm(MCU *mcu): mcu(mcu) {}
 
 void Pcm::PCM_Write(uint32_t address, uint8_t data)
 {
@@ -125,9 +123,7 @@ void Pcm::PCM_Write(uint32_t address, uint8_t data)
             if ((address & 4) == 0)
                 ix |= 2;
 
-            pthread_spin_lock(&pcm_lock);
             pcm.ram1[pcm.select_channel][ix] = pcm.write_latch;
-            pthread_spin_unlock(&pcm_lock);
         }
     }
     else if ((address >= 0x10 && address < 0x20) || (address >= 0x30 && address < 0x38))
@@ -149,9 +145,7 @@ void Pcm::PCM_Write(uint32_t address, uint8_t data)
             if (address & 32)
                 ix |= 8;
 
-            pthread_spin_lock(&pcm_lock);
             pcm.ram2[pcm.select_channel][ix] = pcm.write_latch;
-            pthread_spin_unlock(&pcm_lock);
         }
     }
 }
@@ -172,7 +166,6 @@ uint8_t Pcm::PCM_Read(uint32_t address)
     }
     else if (address == 0x3c || address == 0x3e) // status
     {
-        pthread_spin_lock(&pcm_lock);
         uint8_t status = 0;
         if (address == 0x3e && pcm.irq_assert)
         {
@@ -183,7 +176,6 @@ uint8_t Pcm::PCM_Read(uint32_t address)
         status |= pcm.irq_channel;
         if (pcm.voice_mask_updating)
             status |= 32;
-        pthread_spin_unlock(&pcm_lock);
 
         return status;
     }
@@ -244,9 +236,15 @@ constexpr inline int32_t sx20(int32_t in)
     return (in << 12) >> 12;
 }
 
-inline int32_t addclip20(int32_t add1, int32_t add2, int32_t cin)
+inline uint32_t addclip20(uint32_t add1, uint32_t add2, uint32_t cin)
 {
-    return sx20(add1) + sx20(add2) + cin;
+    /* Saturating 20-bit addition - clips on overflow to prevent audio cracks */
+    uint32_t sum = (add1 + add2 + cin) & 0xfffff;
+    if ((add1 & 0x80000) != 0 && (add2 & 0x80000) != 0 && (sum & 0x80000) == 0)
+        sum = 0x80000;  /* Negative overflow - clip to min */
+    else if ((add1 & 0x80000) == 0 && (add2 & 0x80000) == 0 && (sum & 0x80000) != 0)
+        sum = 0x7ffff;  /* Positive overflow - clip to max */
+    return sum;
 }
 
 inline int32_t multi(int32_t val1, int8_t val2)
@@ -427,8 +425,6 @@ void Pcm::PCM_Update(uint64_t cycles)
     int voice_active = pcm.voice_mask & pcm.voice_mask_pending;
     while (pcm.cycles < cycles)
     {
-        pthread_spin_lock(&pcm_lock);
-
         int tt[2] = {};
 
         { // final mixing
@@ -1420,8 +1416,6 @@ void Pcm::PCM_Update(uint64_t cycles)
         {
             pcm.ram2[31][7] |= 0x20;
         }
-
-        pthread_spin_unlock(&pcm_lock);
 
         pcm.nfs = 1;
 

@@ -368,14 +368,11 @@ struct MCU {
   uint8_t TIMER_Read2(const uint32_t address);
 
   inline void MCU_PostSample(int *sample) {
-    sample_buffer[sample_write_ptr++] = sample[0] >> 16;
-    sample_buffer[sample_write_ptr++] = sample[1] >> 16;
+    int16_t l = sample[0] >> 16;
+    int16_t r = sample[1] >> 16;
+    sample_buffer[sample_write_ptr++] = l;
+    sample_buffer[sample_write_ptr++] = r;
     sample_write_ptr %= audio_buffer_size;
-
-    // int ptr = SDL_AtomicGet(&sample_write_ptr);
-    // sample_buffer[ptr] = sample[0] >> 16;
-    // sample_buffer[ptr + 1] = sample[1] >> 16;
-    // SDL_AtomicSet(&sample_write_ptr, (ptr + 2) % audio_buffer_size);
   }
 
   inline uint32_t MCU_GetAddress(const uint8_t page, const uint16_t address) {

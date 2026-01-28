@@ -47,6 +47,18 @@ echo "Cross prefix: $CROSS_PREFIX"
 mkdir -p build
 mkdir -p dist/minijv/roms/expansions
 
+# Compile resample library (C code)
+echo "Compiling resample library..."
+for f in resample resamplesubs filterkit; do
+    ${CROSS_PREFIX}gcc -Ofast -c -fPIC \
+        -march=armv8-a -mtune=cortex-a72 \
+        -fomit-frame-pointer -fno-stack-protector \
+        -DNDEBUG \
+        src/dsp/resample/${f}.c \
+        -Isrc/dsp/resample \
+        -o build/${f}.o
+done
+
 # Compile DSP plugin (with aggressive optimizations for CM4)
 echo "Compiling DSP plugin..."
 ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
@@ -58,8 +70,10 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
     src/dsp/mcu.cpp \
     src/dsp/mcu_opcodes.cpp \
     src/dsp/pcm.cpp \
+    build/resample.o build/resamplesubs.o build/filterkit.o \
     -o build/dsp.so \
     -Isrc/dsp \
+    -Isrc/dsp/resample \
     -lm -lpthread
 
 # Copy files to dist (use cat to avoid ExtFS deallocation issues with Docker)
