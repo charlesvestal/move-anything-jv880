@@ -2253,9 +2253,9 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             fprintf(stderr, "JV880 v2: Failed to save NVRAM to %s\n", path);
         }
     } else if (strncmp(key, "save_to_slot_", 13) == 0 && inst->mcu) {
-        /* Save current working patch to user slot 1-8 (menu items) */
-        int slot = atoi(key + 13) - 1;  /* Convert 1-8 to 0-7 */
-        if (slot >= 0 && slot < 8) {
+        /* Save current working patch to user slot 1-64 (menu items) */
+        int slot = atoi(key + 13) - 1;  /* Convert 1-64 to 0-63 */
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
             uint32_t dest_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
             memcpy(&inst->mcu->nvram[dest_offset],
                    &inst->mcu->nvram[NVRAM_PATCH_OFFSET], PATCH_SIZE);
@@ -2270,6 +2270,23 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (f) {
                 fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
                 fclose(f);
+            }
+        }
+    } else if (strncmp(key, "load_from_slot_", 15) == 0 && inst->mcu) {
+        /* Load user patch from slot 1-64 (menu items) */
+        int slot = atoi(key + 15) - 1;  /* Convert 1-64 to 0-63 */
+        if (slot >= 0 && slot < NUM_USER_PATCHES) {
+            uint32_t src_offset = NVRAM_PATCH_INTERNAL + (slot * PATCH_SIZE);
+            /* Check if slot has valid data (not 0xFF filled) */
+            if (inst->mcu->nvram[src_offset] != 0xFF) {
+                memcpy(&inst->mcu->nvram[NVRAM_PATCH_OFFSET],
+                       &inst->mcu->nvram[src_offset], PATCH_SIZE);
+                char name[PATCH_NAME_LEN + 1];
+                memcpy(name, &inst->mcu->nvram[src_offset], PATCH_NAME_LEN);
+                name[PATCH_NAME_LEN] = '\0';
+                fprintf(stderr, "JV880 v2: Loaded patch '%s' from User slot %d\n", name, slot + 1);
+            } else {
+                fprintf(stderr, "JV880 v2: User slot %d is empty\n", slot + 1);
             }
         }
     } else if (strcmp(key, "save_to_user_slot") == 0 && inst->mcu) {
@@ -3059,29 +3076,107 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"params\":[]"
                 "},"
                 "\"save_patch\":{"
-                    "\"label\":\"Save to User Slot\","
+                    "\"label\":\"Save Patch\","
                     "\"children\":null,"
                     "\"knobs\":[],"
                     "\"params\":["
-                        "{\"key\":\"save_to_slot_1\",\"label\":\"Slot 01\"},"
-                        "{\"key\":\"save_to_slot_2\",\"label\":\"Slot 02\"},"
-                        "{\"key\":\"save_to_slot_3\",\"label\":\"Slot 03\"},"
-                        "{\"key\":\"save_to_slot_4\",\"label\":\"Slot 04\"},"
-                        "{\"key\":\"save_to_slot_5\",\"label\":\"Slot 05\"},"
-                        "{\"key\":\"save_to_slot_6\",\"label\":\"Slot 06\"},"
-                        "{\"key\":\"save_to_slot_7\",\"label\":\"Slot 07\"},"
-                        "{\"key\":\"save_to_slot_8\",\"label\":\"Slot 08\"}"
+                        "{\"level\":\"save_01_16\",\"label\":\"Slots 01-16\"},"
+                        "{\"level\":\"save_17_32\",\"label\":\"Slots 17-32\"},"
+                        "{\"level\":\"save_33_48\",\"label\":\"Slots 33-48\"},"
+                        "{\"level\":\"save_49_64\",\"label\":\"Slots 49-64\"}"
                     "]"
                 "},"
+                "\"save_01_16\":{\"label\":\"Save to Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"save_to_slot_1\",\"label\":\"01\"},{\"key\":\"save_to_slot_2\",\"label\":\"02\"},"
+                    "{\"key\":\"save_to_slot_3\",\"label\":\"03\"},{\"key\":\"save_to_slot_4\",\"label\":\"04\"},"
+                    "{\"key\":\"save_to_slot_5\",\"label\":\"05\"},{\"key\":\"save_to_slot_6\",\"label\":\"06\"},"
+                    "{\"key\":\"save_to_slot_7\",\"label\":\"07\"},{\"key\":\"save_to_slot_8\",\"label\":\"08\"},"
+                    "{\"key\":\"save_to_slot_9\",\"label\":\"09\"},{\"key\":\"save_to_slot_10\",\"label\":\"10\"},"
+                    "{\"key\":\"save_to_slot_11\",\"label\":\"11\"},{\"key\":\"save_to_slot_12\",\"label\":\"12\"},"
+                    "{\"key\":\"save_to_slot_13\",\"label\":\"13\"},{\"key\":\"save_to_slot_14\",\"label\":\"14\"},"
+                    "{\"key\":\"save_to_slot_15\",\"label\":\"15\"},{\"key\":\"save_to_slot_16\",\"label\":\"16\"}"
+                "]},"
+                "\"save_17_32\":{\"label\":\"Save to Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"save_to_slot_17\",\"label\":\"17\"},{\"key\":\"save_to_slot_18\",\"label\":\"18\"},"
+                    "{\"key\":\"save_to_slot_19\",\"label\":\"19\"},{\"key\":\"save_to_slot_20\",\"label\":\"20\"},"
+                    "{\"key\":\"save_to_slot_21\",\"label\":\"21\"},{\"key\":\"save_to_slot_22\",\"label\":\"22\"},"
+                    "{\"key\":\"save_to_slot_23\",\"label\":\"23\"},{\"key\":\"save_to_slot_24\",\"label\":\"24\"},"
+                    "{\"key\":\"save_to_slot_25\",\"label\":\"25\"},{\"key\":\"save_to_slot_26\",\"label\":\"26\"},"
+                    "{\"key\":\"save_to_slot_27\",\"label\":\"27\"},{\"key\":\"save_to_slot_28\",\"label\":\"28\"},"
+                    "{\"key\":\"save_to_slot_29\",\"label\":\"29\"},{\"key\":\"save_to_slot_30\",\"label\":\"30\"},"
+                    "{\"key\":\"save_to_slot_31\",\"label\":\"31\"},{\"key\":\"save_to_slot_32\",\"label\":\"32\"}"
+                "]},"
+                "\"save_33_48\":{\"label\":\"Save to Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"save_to_slot_33\",\"label\":\"33\"},{\"key\":\"save_to_slot_34\",\"label\":\"34\"},"
+                    "{\"key\":\"save_to_slot_35\",\"label\":\"35\"},{\"key\":\"save_to_slot_36\",\"label\":\"36\"},"
+                    "{\"key\":\"save_to_slot_37\",\"label\":\"37\"},{\"key\":\"save_to_slot_38\",\"label\":\"38\"},"
+                    "{\"key\":\"save_to_slot_39\",\"label\":\"39\"},{\"key\":\"save_to_slot_40\",\"label\":\"40\"},"
+                    "{\"key\":\"save_to_slot_41\",\"label\":\"41\"},{\"key\":\"save_to_slot_42\",\"label\":\"42\"},"
+                    "{\"key\":\"save_to_slot_43\",\"label\":\"43\"},{\"key\":\"save_to_slot_44\",\"label\":\"44\"},"
+                    "{\"key\":\"save_to_slot_45\",\"label\":\"45\"},{\"key\":\"save_to_slot_46\",\"label\":\"46\"},"
+                    "{\"key\":\"save_to_slot_47\",\"label\":\"47\"},{\"key\":\"save_to_slot_48\",\"label\":\"48\"}"
+                "]},"
+                "\"save_49_64\":{\"label\":\"Save to Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"save_to_slot_49\",\"label\":\"49\"},{\"key\":\"save_to_slot_50\",\"label\":\"50\"},"
+                    "{\"key\":\"save_to_slot_51\",\"label\":\"51\"},{\"key\":\"save_to_slot_52\",\"label\":\"52\"},"
+                    "{\"key\":\"save_to_slot_53\",\"label\":\"53\"},{\"key\":\"save_to_slot_54\",\"label\":\"54\"},"
+                    "{\"key\":\"save_to_slot_55\",\"label\":\"55\"},{\"key\":\"save_to_slot_56\",\"label\":\"56\"},"
+                    "{\"key\":\"save_to_slot_57\",\"label\":\"57\"},{\"key\":\"save_to_slot_58\",\"label\":\"58\"},"
+                    "{\"key\":\"save_to_slot_59\",\"label\":\"59\"},{\"key\":\"save_to_slot_60\",\"label\":\"60\"},"
+                    "{\"key\":\"save_to_slot_61\",\"label\":\"61\"},{\"key\":\"save_to_slot_62\",\"label\":\"62\"},"
+                    "{\"key\":\"save_to_slot_63\",\"label\":\"63\"},{\"key\":\"save_to_slot_64\",\"label\":\"64\"}"
+                "]},"
                 "\"user_patches\":{"
                     "\"label\":\"Load User Patch\","
-                    "\"list_param\":\"load_slot\","
-                    "\"count_param\":\"load_slot_count\","
-                    "\"name_param\":\"load_slot_name\","
-                    "\"children\":\"patch_main\","
+                    "\"children\":null,"
                     "\"knobs\":[],"
-                    "\"params\":[]"
-                "}"
+                    "\"params\":["
+                        "{\"level\":\"load_01_16\",\"label\":\"Slots 01-16\"},"
+                        "{\"level\":\"load_17_32\",\"label\":\"Slots 17-32\"},"
+                        "{\"level\":\"load_33_48\",\"label\":\"Slots 33-48\"},"
+                        "{\"level\":\"load_49_64\",\"label\":\"Slots 49-64\"}"
+                    "]"
+                "},"
+                "\"load_01_16\":{\"label\":\"Load from Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"load_from_slot_1\",\"label\":\"01\"},{\"key\":\"load_from_slot_2\",\"label\":\"02\"},"
+                    "{\"key\":\"load_from_slot_3\",\"label\":\"03\"},{\"key\":\"load_from_slot_4\",\"label\":\"04\"},"
+                    "{\"key\":\"load_from_slot_5\",\"label\":\"05\"},{\"key\":\"load_from_slot_6\",\"label\":\"06\"},"
+                    "{\"key\":\"load_from_slot_7\",\"label\":\"07\"},{\"key\":\"load_from_slot_8\",\"label\":\"08\"},"
+                    "{\"key\":\"load_from_slot_9\",\"label\":\"09\"},{\"key\":\"load_from_slot_10\",\"label\":\"10\"},"
+                    "{\"key\":\"load_from_slot_11\",\"label\":\"11\"},{\"key\":\"load_from_slot_12\",\"label\":\"12\"},"
+                    "{\"key\":\"load_from_slot_13\",\"label\":\"13\"},{\"key\":\"load_from_slot_14\",\"label\":\"14\"},"
+                    "{\"key\":\"load_from_slot_15\",\"label\":\"15\"},{\"key\":\"load_from_slot_16\",\"label\":\"16\"}"
+                "]},"
+                "\"load_17_32\":{\"label\":\"Load from Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"load_from_slot_17\",\"label\":\"17\"},{\"key\":\"load_from_slot_18\",\"label\":\"18\"},"
+                    "{\"key\":\"load_from_slot_19\",\"label\":\"19\"},{\"key\":\"load_from_slot_20\",\"label\":\"20\"},"
+                    "{\"key\":\"load_from_slot_21\",\"label\":\"21\"},{\"key\":\"load_from_slot_22\",\"label\":\"22\"},"
+                    "{\"key\":\"load_from_slot_23\",\"label\":\"23\"},{\"key\":\"load_from_slot_24\",\"label\":\"24\"},"
+                    "{\"key\":\"load_from_slot_25\",\"label\":\"25\"},{\"key\":\"load_from_slot_26\",\"label\":\"26\"},"
+                    "{\"key\":\"load_from_slot_27\",\"label\":\"27\"},{\"key\":\"load_from_slot_28\",\"label\":\"28\"},"
+                    "{\"key\":\"load_from_slot_29\",\"label\":\"29\"},{\"key\":\"load_from_slot_30\",\"label\":\"30\"},"
+                    "{\"key\":\"load_from_slot_31\",\"label\":\"31\"},{\"key\":\"load_from_slot_32\",\"label\":\"32\"}"
+                "]},"
+                "\"load_33_48\":{\"label\":\"Load from Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"load_from_slot_33\",\"label\":\"33\"},{\"key\":\"load_from_slot_34\",\"label\":\"34\"},"
+                    "{\"key\":\"load_from_slot_35\",\"label\":\"35\"},{\"key\":\"load_from_slot_36\",\"label\":\"36\"},"
+                    "{\"key\":\"load_from_slot_37\",\"label\":\"37\"},{\"key\":\"load_from_slot_38\",\"label\":\"38\"},"
+                    "{\"key\":\"load_from_slot_39\",\"label\":\"39\"},{\"key\":\"load_from_slot_40\",\"label\":\"40\"},"
+                    "{\"key\":\"load_from_slot_41\",\"label\":\"41\"},{\"key\":\"load_from_slot_42\",\"label\":\"42\"},"
+                    "{\"key\":\"load_from_slot_43\",\"label\":\"43\"},{\"key\":\"load_from_slot_44\",\"label\":\"44\"},"
+                    "{\"key\":\"load_from_slot_45\",\"label\":\"45\"},{\"key\":\"load_from_slot_46\",\"label\":\"46\"},"
+                    "{\"key\":\"load_from_slot_47\",\"label\":\"47\"},{\"key\":\"load_from_slot_48\",\"label\":\"48\"}"
+                "]},"
+                "\"load_49_64\":{\"label\":\"Load from Slot\",\"children\":null,\"knobs\":[],\"params\":["
+                    "{\"key\":\"load_from_slot_49\",\"label\":\"49\"},{\"key\":\"load_from_slot_50\",\"label\":\"50\"},"
+                    "{\"key\":\"load_from_slot_51\",\"label\":\"51\"},{\"key\":\"load_from_slot_52\",\"label\":\"52\"},"
+                    "{\"key\":\"load_from_slot_53\",\"label\":\"53\"},{\"key\":\"load_from_slot_54\",\"label\":\"54\"},"
+                    "{\"key\":\"load_from_slot_55\",\"label\":\"55\"},{\"key\":\"load_from_slot_56\",\"label\":\"56\"},"
+                    "{\"key\":\"load_from_slot_57\",\"label\":\"57\"},{\"key\":\"load_from_slot_58\",\"label\":\"58\"},"
+                    "{\"key\":\"load_from_slot_59\",\"label\":\"59\"},{\"key\":\"load_from_slot_60\",\"label\":\"60\"},"
+                    "{\"key\":\"load_from_slot_61\",\"label\":\"61\"},{\"key\":\"load_from_slot_62\",\"label\":\"62\"},"
+                    "{\"key\":\"load_from_slot_63\",\"label\":\"63\"},{\"key\":\"load_from_slot_64\",\"label\":\"64\"}"
+                "]}"
             "}"
         "}";
         int len = strlen(hierarchy);
