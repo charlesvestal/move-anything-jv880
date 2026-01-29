@@ -3168,6 +3168,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"label\":\"Jump to Expansion\","
                     "\"items_param\":\"expansion_list\","
                     "\"select_param\":\"jump_to_expansion\","
+                    "\"navigate_to\":\"patch\","
                     "\"children\":null,"
                     "\"knobs\":[],"
                     "\"params\":[]"
