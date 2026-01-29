@@ -4,7 +4,7 @@
   "abbrev": "JV",
   "version": "0.4.2",
   "description": "ROM-based PCM rompler emulator",
-  "author": "nukeykt/giulioz",
+  "author": "nukeykt/giulioz (port: charlesvestal)",
   "license": "Non-commercial",
   "ui": "ui.js",
   "dsp": "dsp.so",
