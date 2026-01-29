@@ -1872,6 +1872,25 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (oct > 4) oct = 4;
             inst->octave_transpose = oct;
         }
+
+        /* Restore working patch data from hex string */
+        if (inst->mcu) {
+            const char *patch_start = strstr(val, "\"patch\":\"");
+            if (patch_start) {
+                patch_start += 9;  /* Skip past "patch":" */
+                const char *patch_end = strchr(patch_start, '"');
+                if (patch_end && (patch_end - patch_start) == PATCH_SIZE * 2) {
+                    /* Decode hex to NVRAM */
+                    for (int i = 0; i < PATCH_SIZE; i++) {
+                        unsigned int byte;
+                        if (sscanf(patch_start + i * 2, "%2X", &byte) == 1) {
+                            inst->mcu->nvram[NVRAM_PATCH_OFFSET + i] = (uint8_t)byte;
+                        }
+                    }
+                    fprintf(stderr, "JV880 v2: Restored working patch from state\n");
+                }
+            }
+        }
         return;
     }
 
@@ -2710,9 +2729,9 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     /* State serialization for patch save/load */
     if (strcmp(key, "state") == 0) {
-        return snprintf(buf, buf_len,
+        int written = snprintf(buf, buf_len,
             "{\"mode\":%d,\"preset\":%d,\"performance\":%d,\"part\":%d,\"octave_transpose\":%d,"
-            "\"expansion_index\":%d,\"expansion_bank_offset\":%d}",
+            "\"expansion_index\":%d,\"expansion_bank_offset\":%d",
             inst->performance_mode ? 1 : 0,
             inst->current_patch,
             inst->current_performance,
@@ -2720,6 +2739,18 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             inst->octave_transpose,
             inst->current_expansion,
             inst->expansion_bank_offset);
+
+        /* Include working patch data as hex if MCU is ready */
+        if (inst->mcu && written < buf_len - 800) {
+            written += snprintf(buf + written, buf_len - written, ",\"patch\":\"");
+            for (int i = 0; i < PATCH_SIZE && written < buf_len - 10; i++) {
+                written += snprintf(buf + written, buf_len - written, "%02X",
+                    inst->mcu->nvram[NVRAM_PATCH_OFFSET + i]);
+            }
+            written += snprintf(buf + written, buf_len - written, "\"");
+        }
+        written += snprintf(buf + written, buf_len - written, "}");
+        return written;
     }
     if (strcmp(key, "loading_complete") == 0) {
         return snprintf(buf, buf_len, "%d", inst->loading_complete);
@@ -2821,8 +2852,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* Patchbank list for part bank selection (no Card - expansion waveforms via User patches) */
     if (strcmp(key, "patchbank_list") == 0) {
         return snprintf(buf, buf_len,
-            "[{\"index\":0,\"name\":\"User\"},"
-            "{\"index\":1,\"name\":\"Internal\"},"
+            "[{\"index\":1,\"name\":\"Internal\"},"
             "{\"index\":2,\"name\":\"Preset A\"},"
             "{\"index\":3,\"name\":\"Preset B\"}]");
     }
@@ -2865,34 +2895,36 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     /* Save patch slot list - shows all 64 slots for saving */
     if (strcmp(key, "save_patch_slot_list") == 0) {
-        if (!inst->mcu) {
-            return snprintf(buf, buf_len, "[{\"index\":0,\"label\":\"Loading...\"}]");
-        }
         int written = snprintf(buf, buf_len, "[");
-        for (int i = 0; i < NUM_USER_PATCHES && written < buf_len - 100; i++) {
-            uint32_t offset = NVRAM_PATCH_INTERNAL + (i * PATCH_SIZE);
-            char name[PATCH_NAME_LEN + 1];
-            /* Check if slot has valid data */
-            if (inst->mcu->nvram[offset] != 0xFF) {
-                memcpy(name, &inst->mcu->nvram[offset], PATCH_NAME_LEN);
-                name[PATCH_NAME_LEN] = '\0';
-                int len = PATCH_NAME_LEN;
-                while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == 0)) len--;
-                name[len] = '\0';
-            } else {
-                strcpy(name, "(empty)");
-            }
+        for (int i = 0; i < 64; i++) {
             if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
+
+            const char *slot_name = "(empty)";
+            char name_buf[16];
+
+            if (inst->mcu) {
+                uint32_t offset = NVRAM_PATCH_INTERNAL + (i * PATCH_SIZE);
+                if (inst->mcu->nvram[offset] != 0xFF) {
+                    /* Copy and trim patch name */
+                    memcpy(name_buf, &inst->mcu->nvram[offset], 12);
+                    name_buf[12] = '\0';
+                    for (int j = 11; j >= 0 && name_buf[j] == ' '; j--) {
+                        name_buf[j] = '\0';
+                    }
+                    slot_name = name_buf;
+                }
+            }
+
             written += snprintf(buf + written, buf_len - written,
-                "{\"index\":%d,\"label\":\"%02d: %s\"}", i, i + 1, name);
+                "{\"index\":%d,\"name\":\"%02d: %s\"}", i, i + 1, slot_name);
         }
         written += snprintf(buf + written, buf_len - written, "]");
         return written;
     }
-    /* Load patch slot list - shows all 64 slots for loading (only non-empty) */
+    /* Load patch slot list - shows only non-empty slots for loading */
     if (strcmp(key, "load_patch_slot_list") == 0) {
         if (!inst->mcu) {
-            return snprintf(buf, buf_len, "[]");
+            return snprintf(buf, buf_len, "[{\"index\":-1,\"name\":\"Loading...\"}]");
         }
         int written = snprintf(buf, buf_len, "[");
         int first = 1;
@@ -2909,8 +2941,13 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 if (!first) written += snprintf(buf + written, buf_len - written, ",");
                 first = 0;
                 written += snprintf(buf + written, buf_len - written,
-                    "{\"index\":%d,\"label\":\"%02d: %s\"}", i, i + 1, name);
+                    "{\"index\":%d,\"name\":\"%02d: %s\"}", i, i + 1, name);
             }
+        }
+        /* If no patches found, show message */
+        if (first) {
+            written += snprintf(buf + written, buf_len - written,
+                "{\"index\":-1,\"name\":\"No saved patches\"}");
         }
         written += snprintf(buf + written, buf_len - written, "]");
         return written;
@@ -3050,8 +3087,6 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"params\":["
                         "{\"level\":\"tone_selector\",\"label\":\"Edit Tones\"},"
                         "{\"level\":\"patch_common\",\"label\":\"Common Settings\"},"
-                        "{\"level\":\"save_patch\",\"label\":\"Save Patch\"},"
-                        "{\"level\":\"user_patches\",\"label\":\"Load User Patch\"},"
                         "{\"level\":\"expansions\",\"label\":\"Jump to Expansion\"}"
                     "]"
                 "},"
@@ -3133,22 +3168,6 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"label\":\"Jump to Expansion\","
                     "\"items_param\":\"expansion_list\","
                     "\"select_param\":\"jump_to_expansion\","
-                    "\"children\":null,"
-                    "\"knobs\":[],"
-                    "\"params\":[]"
-                "},"
-                "\"save_patch\":{"
-                    "\"label\":\"Save Patch\","
-                    "\"items_param\":\"save_patch_slot_list\","
-                    "\"select_param\":\"do_save_to_slot\","
-                    "\"children\":null,"
-                    "\"knobs\":[],"
-                    "\"params\":[]"
-                "},"
-                "\"user_patches\":{"
-                    "\"label\":\"Load User Patch\","
-                    "\"items_param\":\"load_patch_slot_list\","
-                    "\"select_param\":\"do_load_from_slot\","
                     "\"children\":null,"
                     "\"knobs\":[],"
                     "\"params\":[]"
@@ -3255,7 +3274,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"key\":\"reverbsendlevel\",\"name\":\"Reverb Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"chorussendlevel\",\"name\":\"Chorus Send\",\"type\":\"int\",\"min\":0,\"max\":127},"
             /* Part params (suffix only - child_prefix adds sram_part_N_) */
-            "{\"key\":\"patchbank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[\"User\",\"Internal\",\"Preset A\",\"Preset B\"]},"
+            "{\"key\":\"patchbank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[\"Internal\",\"Preset A\",\"Preset B\"]},"
             "{\"key\":\"partlevel\",\"name\":\"Part Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"partpan\",\"name\":\"Part Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"patchnumber\",\"name\":\"Patch\",\"type\":\"int\",\"min\":0,\"max\":63},"
