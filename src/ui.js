@@ -297,7 +297,15 @@ function handleItemsInput(cc, value) {
             const item = itemsList[menuIndex];
             const selectValue = item.index !== undefined ? item.index : menuIndex;
             host_module_set_param(currentLevel.select_param, String(selectValue));
-            navigateBack();
+
+            // Check if this level specifies where to navigate after selection
+            if (currentLevel.navigate_to) {
+                // Clear stack and navigate to specified level
+                levelStack = [];
+                navigateToLevel(currentLevel.navigate_to);
+            } else {
+                navigateBack();
+            }
         }
     }
 }
