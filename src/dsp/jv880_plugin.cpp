@@ -2866,7 +2866,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* Save patch slot list - shows all 64 slots for saving */
     if (strcmp(key, "save_patch_slot_list") == 0) {
         if (!inst->mcu) {
-            return snprintf(buf, buf_len, "[{\"index\":0,\"name\":\"Loading...\"}]");
+            return snprintf(buf, buf_len, "[{\"index\":0,\"label\":\"Loading...\"}]");
         }
         int written = snprintf(buf, buf_len, "[");
         for (int i = 0; i < NUM_USER_PATCHES && written < buf_len - 100; i++) {
@@ -2884,7 +2884,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             }
             if (i > 0) written += snprintf(buf + written, buf_len - written, ",");
             written += snprintf(buf + written, buf_len - written,
-                "{\"index\":%d,\"name\":\"%02d: %s\"}", i, i + 1, name);
+                "{\"index\":%d,\"label\":\"%02d: %s\"}", i, i + 1, name);
         }
         written += snprintf(buf + written, buf_len - written, "]");
         return written;
@@ -2909,7 +2909,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 if (!first) written += snprintf(buf + written, buf_len - written, ",");
                 first = 0;
                 written += snprintf(buf + written, buf_len - written,
-                    "{\"index\":%d,\"name\":\"%02d: %s\"}", i, i + 1, name);
+                    "{\"index\":%d,\"label\":\"%02d: %s\"}", i, i + 1, name);
             }
         }
         written += snprintf(buf + written, buf_len - written, "]");
