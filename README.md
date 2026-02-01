@@ -45,7 +45,7 @@ ROM files (v1.0.0):
   - `jv880_rom2.bin` (256KB)
   - `jv880_waverom1.bin` (2MB)
   - `jv880_waverom2.bin` (2MB)
-  - `jv880_nvram.bin` (optional, 32KB)
+  - `jv880_nvram.bin` (32KB)
 
 **Note:** ROM version 1.0.0 is required. Version 1.0.1 ROMs do not work correctly.
 
