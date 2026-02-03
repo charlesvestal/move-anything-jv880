@@ -65,7 +65,7 @@ let tickCount = 0;
 
 /* === Initialization === */
 function init() {
-    std.printf("Mini-JV Hierarchy UI: init\n");
+    console.log("Mini-JV Hierarchy UI: init");
     loadHierarchy();
 }
 
@@ -76,9 +76,9 @@ function loadHierarchy() {
     if (hierJson) {
         try {
             hierarchy = JSON.parse(hierJson);
-            std.printf("Hierarchy loaded: modes=%s\n", JSON.stringify(hierarchy.modes));
+            console.log("Hierarchy loaded: modes=" + JSON.stringify(hierarchy.modes));
         } catch (e) {
-            std.printf("Error parsing hierarchy: %s\n", e);
+            console.log("Error parsing hierarchy: " + e);
         }
     }
 
@@ -90,9 +90,9 @@ function loadHierarchy() {
             for (const p of chainParams) {
                 chainParamsMap[p.key] = p;
             }
-            std.printf("Chain params loaded: %d params\n", chainParams.length);
+            console.log("Chain params loaded: " + chainParams.length + " params");
         } catch (e) {
-            std.printf("Error parsing chain_params: %s\n", e);
+            console.log("Error parsing chain_params: " + e);
         }
     }
 
@@ -107,7 +107,7 @@ function loadHierarchy() {
 /* === Level Navigation === */
 function navigateToLevel(levelName) {
     if (!hierarchy || !hierarchy.levels[levelName]) {
-        std.printf("Level not found: %s\n", levelName);
+        console.log("Level not found: " + levelName);
         return;
     }
 
@@ -140,7 +140,7 @@ function navigateToLevel(levelName) {
     }
 
     needsRedraw = true;
-    std.printf("Navigated to level: %s\n", levelName);
+    console.log("Navigated to level: " + levelName);
 }
 
 function navigateBack() {
@@ -543,12 +543,7 @@ function drawChildSelector() {
 
     const totalTime = Date.now() - t0;
     if (totalTime > 5) {
-        const msg = "drawChildSelector: total=" + totalTime + "ms, getParam=" + getParamTime + "ms, draw=" + drawTime + "ms\n";
-        try {
-            const f = std.open("/tmp/jv880_ui.log", "a");
-            f.puts(msg);
-            f.close();
-        } catch(e) {}
+        console.log("drawChildSelector: total=" + totalTime + "ms, getParam=" + getParamTime + "ms, draw=" + drawTime + "ms");
     }
 }
 
@@ -622,14 +617,18 @@ function tick() {
         loadHierarchy();
     }
 
-    // Refresh data periodically - ONLY for list browsers that need name updates
+    // Refresh data periodically for list browsers
     if (tickCount % 10 === 0) {
         if (currentLevel && currentLevel.list_param) {
-            listName = host_module_get_param(currentLevel.name_param) || '';
-            needsRedraw = true;
+            const newCount = parseInt(host_module_get_param(currentLevel.count_param) || '0');
+            const newName = host_module_get_param(currentLevel.name_param) || '';
+            if (newCount !== listCount || newName !== listName) {
+                listCount = newCount;
+                listName = newName;
+                listIndex = parseInt(host_module_get_param(currentLevel.list_param) || '0');
+                needsRedraw = true;
+            }
         }
-        // Don't force redraw for child_count levels (tone/part editing)
-        // Those only need redraw on user input
     }
 
     if (needsRedraw) {

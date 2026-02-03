@@ -483,7 +483,7 @@ typedef struct {
     int octave_transpose;
 
     /* Deferred state restoration (applied after loading completes) */
-    char pending_state[512];
+    char pending_state[2048];
     int pending_state_valid;
 
     /* Error state */
@@ -1887,6 +1887,16 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                             inst->mcu->nvram[NVRAM_PATCH_OFFSET + i] = (uint8_t)byte;
                         }
                     }
+                    /* Send PC 0 to trigger emulator to reload from NVRAM */
+                    uint8_t pc_msg[2] = { 0xC0, 0x00 };
+                    pthread_mutex_lock(&inst->ring_mutex);
+                    int next = (inst->midi_write + 1) % MIDI_QUEUE_SIZE;
+                    if (next != inst->midi_read) {
+                        memcpy(inst->midi_queue[inst->midi_write], pc_msg, 2);
+                        inst->midi_queue_len[inst->midi_write] = 2;
+                        inst->midi_write = next;
+                    }
+                    pthread_mutex_unlock(&inst->ring_mutex);
                     fprintf(stderr, "JV880 v2: Restored working patch from state\n");
                 }
             }
