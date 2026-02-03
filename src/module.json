@@ -11,6 +11,7 @@
   "api_version": 2,
   "raw_ui": true,
   "raw_midi": true,
+  "standalone": false,
   "capabilities": {
     "audio_out": true,
     "audio_in": false,
