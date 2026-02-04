@@ -49,6 +49,8 @@ ROM files (v1.0.0):
 
 **Note:** ROM version 1.0.0 is required. Version 1.0.1 ROMs do not work correctly.
 
+<img width="2462" height="2222" alt="image" src="https://github.com/user-attachments/assets/e4d06eb3-6c25-4576-bef6-c2c98dfbb5aa" />
+
 ## Expansion Cards
 
 Multiple SR-JV80 expansion cards are supported simultaneously. Place expansion ROMs in the `roms/expansions/` subfolder with filenames containing "SR-JV80".
