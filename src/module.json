@@ -2,7 +2,7 @@
   "id": "minijv",
   "name": "Mini-JV",
   "abbrev": "JV",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz (port: charlesvestal)",
   "license": "Non-commercial",
@@ -20,6 +20,15 @@
     "midi_channels": 16,
     "chainable": true,
     "component_type": "sound_generator",
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "name": "Mini-JV",
+          "params": ["mode", "preset", "performance", "octave_transpose"],
+          "knobs": ["preset", "octave_transpose"]
+        }
+      }
+    },
     "default_forward_channel": 1,
     "chain_params": [
       {
