@@ -79,7 +79,7 @@ curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main
 
 2. Copy your ROM files to the device:
 ```bash
-scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin \
+scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin jv880_nvram.bin \
   ableton@move.local:/data/UserData/move-anything/modules/sound_generators/minijv/roms/
 ```
 
