@@ -88,8 +88,7 @@ Background thread runs emulator at accelerated rate to fill audio ring buffer. M
 ## ROM Requirements
 
 - v1.0.0 ROMs required (1.0.1 causes CPU traps)
-- Files: jv880_rom1.bin, jv880_rom2.bin, jv880_waverom1.bin, jv880_waverom2.bin
-- Optional: jv880_nvram.bin
+- Required files: jv880_rom1.bin, jv880_rom2.bin, jv880_waverom1.bin, jv880_waverom2.bin, jv880_nvram.bin
 
 ## Signal Chain Integration
 
