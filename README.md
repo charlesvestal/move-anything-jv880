@@ -74,13 +74,13 @@ Supported expansion cards:
 1. Download and install the module:
 ```bash
 curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main/minijv-module.tar.gz | \
-  ssh ableton@move.local 'tar -xz -C /data/UserData/move-anything/modules/'
+  ssh ableton@move.local 'mkdir -p /data/UserData/move-anything/modules/sound_generators && tar -xz -C /data/UserData/move-anything/modules/sound_generators/'
 ```
 
 2. Copy your ROM files to the device:
 ```bash
 scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin \
-  ableton@move.local:/data/UserData/move-anything/modules/minijv/roms/
+  ableton@move.local:/data/UserData/move-anything/modules/sound_generators/minijv/roms/
 ```
 
 ### Build from Source
