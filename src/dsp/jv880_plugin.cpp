@@ -24,18 +24,9 @@ extern "C" {
 #include "plugin_api_v1.h"
 }
 
-/* Debug logging to file */
-#define JV_DEBUG_LOG "/tmp/jv880_debug.log"
+/* Debug logging - disabled in release builds */
 static void jv_debug(const char *fmt, ...) {
-    FILE *f = fopen(JV_DEBUG_LOG, "a");
-    if (f) {
-        va_list args;
-        va_start(args, fmt);
-        vfprintf(f, fmt, args);
-        va_end(args);
-        fflush(f);
-        fclose(f);
-    }
+    (void)fmt;
 }
 
 /* Patch data constants */
