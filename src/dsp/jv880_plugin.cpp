@@ -421,6 +421,8 @@ typedef struct {
     int pending_perf_select;   /* Countdown to select performance after mode switch */
     int pending_patch_select;  /* Countdown to select patch after mode switch */
     volatile int warmup_remaining;  /* Warmup cycles remaining after reset */
+    int deferred_patch_index;      /* Patch index waiting for debounce to complete */
+    int deferred_patch_countdown;  /* Render blocks remaining before executing deferred patch */
 
     /* Part patch bank selection: 0=User, 1=Internal, 2=PresetA, 3=PresetB */
     int part_patchbank[8];
@@ -864,13 +866,14 @@ static void v2_load_expansion_to_emulator(jv880_instance_t *inst, int exp_index)
 
     inst->current_expansion = exp_index;
 
-    /* In Performance mode, don't reset - just load the ROM data.
-     * The expansion waveforms will be available for Card patches.
-     * In Patch mode, reset to ensure the new expansion is properly initialized. */
+    /* Reset emulator when switching expansions in patch mode.
+     * The emulator can't handle waveform ROM swaps with active voices.
+     * Performance mode skips reset since Card patches handle it differently.
+     * Warmup kept short (5000 cycles) - debounce prevents repeated resets. */
     if (!inst->performance_mode) {
         inst->mcu->SC55_Reset();
-        inst->warmup_remaining = 50000;  /* Warmup after expansion change */
-        fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator (with reset)\n", exp->name);
+        inst->warmup_remaining = 1000;
+        fprintf(stderr, "JV880 v2: Loaded expansion %s to emulator (with reset, short warmup)\n", exp->name);
     } else {
         fprintf(stderr, "JV880 v2: Loaded expansion %s for Card patches (no reset)\n", exp->name);
     }
@@ -1906,8 +1909,21 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
 
     if (strcmp(key, "preset") == 0) {
         int idx = atoi(val);
-        if (idx >= 0 && idx < inst->total_patches) {
-            v2_select_patch(inst, idx);
+        if (idx >= 0 && idx < inst->total_patches && idx != inst->current_patch) {
+            /* Check if this crosses an expansion boundary */
+            int new_exp = inst->patches[idx].expansion_index;
+            int cur_exp = (inst->current_patch >= 0 && inst->current_patch < inst->total_patches)
+                        ? inst->patches[inst->current_patch].expansion_index : -1;
+            if (new_exp >= 0 && new_exp != cur_exp) {
+                /* Cross-expansion: update UI immediately but defer ROM swap */
+                inst->current_patch = idx;
+                inst->deferred_patch_index = idx;
+                inst->deferred_patch_countdown = 3;  /* ~9ms debounce */
+            } else {
+                /* Same expansion or internal: load immediately */
+                inst->deferred_patch_countdown = 0;  /* Cancel any pending */
+                v2_select_patch(inst, idx);
+            }
         }
     } else if (strcmp(key, "octave_transpose") == 0) {
         int v = atoi(val);
@@ -1916,8 +1932,20 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         inst->octave_transpose = v;
     } else if (strcmp(key, "program_change") == 0) {
         int program = atoi(val);
-        if (program >= 0 && program < inst->total_patches) {
-            v2_select_patch(inst, program);
+        if (program >= 0 && program < inst->total_patches && program != inst->current_patch) {
+            /* Check if this crosses an expansion boundary */
+            int new_exp = inst->patches[program].expansion_index;
+            int cur_exp = (inst->current_patch >= 0 && inst->current_patch < inst->total_patches)
+                        ? inst->patches[inst->current_patch].expansion_index : -1;
+            if (new_exp >= 0 && new_exp != cur_exp) {
+                /* Cross-expansion: update UI immediately but defer ROM swap */
+                inst->current_patch = program;
+                inst->deferred_patch_index = program;
+                inst->deferred_patch_countdown = 3;
+            } else {
+                inst->deferred_patch_countdown = 0;
+                v2_select_patch(inst, program);
+            }
         }
     } else if (strcmp(key, "next_bank") == 0) {
         v2_jump_to_bank(inst, 1);
@@ -3378,6 +3406,16 @@ static void v2_render_block(void *instance, int16_t *out, int frames) {
                 jv_debug("[v2_render_block] Executing deferred patch select: %d\n",
                         inst->current_patch);
                 v2_select_patch(inst, inst->current_patch);
+            }
+        }
+
+        /* Handle deferred cross-expansion patch load (debounce) */
+        if (inst->deferred_patch_countdown > 0) {
+            inst->deferred_patch_countdown--;
+            if (inst->deferred_patch_countdown == 0) {
+                jv_debug("[v2_render_block] Executing deferred expansion patch: %d\n",
+                        inst->deferred_patch_index);
+                v2_select_patch(inst, inst->deferred_patch_index);
             }
         }
     }

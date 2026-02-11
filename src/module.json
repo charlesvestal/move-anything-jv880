@@ -2,7 +2,7 @@
   "id": "minijv",
   "name": "Mini-JV",
   "abbrev": "JV",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz (port: charlesvestal)",
   "license": "Non-commercial",
