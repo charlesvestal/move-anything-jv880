@@ -12,6 +12,11 @@
   "raw_ui": true,
   "raw_midi": true,
   "standalone": false,
+  "assets": {
+    "path": "roms",
+    "label": "ROMs",
+    "extensions": [".bin", ".rom"]
+  },
   "capabilities": {
     "audio_out": true,
     "audio_in": false,
