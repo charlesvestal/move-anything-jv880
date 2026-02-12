@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <dirent.h>
+#include <errno.h>
 #include <math.h>
 
 #include "mcu.h"
@@ -939,7 +940,10 @@ static void v2_save_cache(jv880_instance_t *inst) {
     snprintf(cache_path, sizeof(cache_path), "%s/roms/%s", inst->module_dir, CACHE_FILENAME);
 
     FILE *f = fopen(cache_path, "wb");
-    if (!f) return;
+    if (!f) {
+        fprintf(stderr, "JV880 v2: Failed to save cache to %s: %s\n", cache_path, strerror(errno));
+        return;
+    }
 
     CacheHeader hdr;
     hdr.magic = CACHE_MAGIC;
@@ -1920,6 +1924,9 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         int v = atoi(val);
         if (v < -3) v = -3;
         if (v > 3) v = 3;
+        if (v != inst->octave_transpose) {
+            v2_send_all_notes_off(inst);
+        }
         inst->octave_transpose = v;
     } else if (strcmp(key, "program_change") == 0) {
         int program = atoi(val);

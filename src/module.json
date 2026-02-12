@@ -15,7 +15,8 @@
   "assets": {
     "path": "roms",
     "label": "ROMs",
-    "extensions": [".bin", ".rom"]
+    "extensions": [".bin", ".rom"],
+    "allowFolders": true
   },
   "capabilities": {
     "audio_out": true,
