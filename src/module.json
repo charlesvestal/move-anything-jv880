@@ -16,7 +16,8 @@
     "path": "roms",
     "label": "ROMs",
     "extensions": [".bin", ".rom"],
-    "allowFolders": true
+    "allowFolders": true,
+    "description": "Requires JV-880 ROM files. Upload the rom1.bin and rom2.bin files, or a folder containing them."
   },
   "capabilities": {
     "audio_out": true,
