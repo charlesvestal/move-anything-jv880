@@ -2,7 +2,7 @@
   "id": "minijv",
   "name": "Mini-JV",
   "abbrev": "JV",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz (port: charlesvestal)",
   "license": "Non-commercial",
@@ -15,7 +15,10 @@
   "assets": {
     "path": "roms",
     "label": "ROMs",
-    "extensions": [".bin", ".rom"],
+    "extensions": [
+      ".bin",
+      ".rom"
+    ],
     "allowFolders": true,
     "description": "Requires JV-880 ROM files. Upload the rom1.bin and rom2.bin files, or a folder containing them."
   },
@@ -31,8 +34,16 @@
       "levels": {
         "root": {
           "name": "Mini-JV",
-          "params": ["mode", "preset", "performance", "octave_transpose"],
-          "knobs": ["preset", "octave_transpose"]
+          "params": [
+            "mode",
+            "preset",
+            "performance",
+            "octave_transpose"
+          ],
+          "knobs": [
+            "preset",
+            "octave_transpose"
+          ]
         }
       }
     },
@@ -42,7 +53,10 @@
         "key": "mode",
         "name": "Mode",
         "type": "enum",
-        "options": ["Patch", "Performance"],
+        "options": [
+          "Patch",
+          "Performance"
+        ],
         "default": 0
       },
       {
