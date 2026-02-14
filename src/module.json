@@ -2,7 +2,7 @@
   "id": "minijv",
   "name": "Mini-JV",
   "abbrev": "JV",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "ROM-based PCM rompler emulator",
   "author": "nukeykt/giulioz (port: charlesvestal)",
   "license": "Non-commercial",
@@ -20,7 +20,10 @@
       ".rom"
     ],
     "allowFolders": true,
-    "description": "Requires JV-880 ROM files. Upload the rom1.bin and rom2.bin files, or a folder containing them."
+    "description": "Requires JV-880 ROM files. Upload the rom1.bin and rom2.bin files, or a folder containing them.",
+    "hint": "Upload JV-880 ROM files. The plugin requires the v1.0.0 waveform ROMs including jv880_nvram.bin. Upload expansion bins to the expansions folder.",
+    "hint_url": "https://github.com/charlesvestal/move-anything-jv880",
+    "hint_url_label": "Read more"
   },
   "capabilities": {
     "audio_out": true,
