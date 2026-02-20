@@ -1,14 +1,14 @@
-# Move Anything - Mini-JV Module
+# Move Everything - Mini-JV Module
 
-ROM-based PCM synthesizer emulator module for [Move Anything](https://github.com/charlesvestal/move-anything).
+ROM-based PCM synthesizer emulator module for [Move Everything](https://github.com/charlesvestal/move-anything).
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
 ## Quick Start
 
-**Already have ROMs and Move Anything installed?**
+**Already have ROMs and Move Everything installed?**
 
-1. Launch Move Anything → **Module Store** → **Sound Generators** → **Mini-JV** → **Install**
+1. Launch Move Everything → **Module Store** → **Sound Generators** → **Mini-JV** → **Install**
 2. Copy your ROM files to Move (see Requirements below)
 3. Select **Mini-JV** from the main menu
 4. **Play pads** - you're making Mini-JV sounds!
@@ -35,7 +35,7 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 
 ## Prerequisites
 
-- [Move Anything](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
+- [Move Everything](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
 - SSH access enabled: http://move.local/development/ssh
 
 ## Requirements
@@ -124,3 +124,10 @@ This module includes code from:
 - Nuked-SC55 by nukeykt
 
 See LICENSE file for details.
+
+## AI Assistance Disclaimer
+
+This module is part of Move Everything and was developed with AI assistance, including Claude, Codex, and other AI assistants.
+
+All architecture, implementation, and release decisions are reviewed by human maintainers.  
+AI-assisted content may still contain errors, so please validate functionality, security, and license compatibility before production use.
