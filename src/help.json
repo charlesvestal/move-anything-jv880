@@ -1,0 +1,196 @@
+{
+  "title": "Mini-JV",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Roland JV-880 PCM",
+        "synthesizer emulator.",
+        "",
+        "28-voice polyphony.",
+        "192 factory patches",
+        "(Preset A, B, and",
+        "Internal banks).",
+        "",
+        "Two modes:",
+        " Patch: single sound",
+        "  with 4-tone edit",
+        " Performance: 8 parts",
+        "  on channels 1-8",
+        "",
+        "Supports SR-JV80",
+        "expansion ROMs."
+      ]
+    },
+    {
+      "title": "Setup",
+      "children": [
+        {
+          "title": "ROM Files",
+          "lines": [
+            "Requires JV-880",
+            "v1.0.0 ROM files in",
+            "the roms/ folder:",
+            "",
+            " jv880_rom1.bin",
+            " jv880_rom2.bin",
+            " jv880_waverom1.bin",
+            " jv880_waverom2.bin",
+            "",
+            "Upload via the ME",
+            "Installer's asset",
+            "copy feature.",
+            "",
+            "v1.0.1 ROMs do NOT",
+            "work (CPU traps)."
+          ]
+        },
+        {
+          "title": "Expansion ROMs",
+          "lines": [
+            "Optional SR-JV80",
+            "expansion cards.",
+            "",
+            "Place .bin files in",
+            "roms/expansions/",
+            "",
+            "Files must have",
+            "\"SR-JV80\" in the",
+            "filename.",
+            "",
+            "Auto-unscrambled on",
+            "first load. Patches",
+            "appear after the",
+            "192 factory sounds.",
+            "",
+            "Up to 32 expansions."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Patch Mode",
+      "children": [
+        {
+          "title": "Navigation",
+          "lines": [
+            "Jog: browse patches",
+            "L/R: prev/next",
+            "Shift+L/R: next bank",
+            "",
+            "Banks:",
+            " Preset A (0-63)",
+            " Preset B (64-127)",
+            " Internal (128-191)",
+            " Expansions (192+)"
+          ]
+        },
+        {
+          "title": "Knobs (Patch)",
+          "lines": [
+            "Knob 1: Cutoff",
+            " TVF filter freq",
+            "",
+            "Knob 2: Resonance",
+            " Filter emphasis",
+            "",
+            "Knob 3: Attack",
+            " Amp env attack",
+            "",
+            "Knob 4: Release",
+            " Amp env release",
+            "",
+            "Knob 5: LFO Rate",
+            "Knob 6: LFO Depth",
+            " (filter)",
+            "",
+            "Knob 7: FX Send",
+            " Reverb level",
+            "",
+            "Knob 8: Level",
+            " Tone output"
+          ]
+        },
+        {
+          "title": "Tone Editing",
+          "lines": [
+            "Each patch has 4",
+            "tones (layers).",
+            "",
+            "Track 1-4 buttons:",
+            " Select tone 1-4",
+            "",
+            "Shift+Track:",
+            " Mute/unmute tone",
+            "",
+            "Knob edits apply to",
+            "the selected tone.",
+            "",
+            "Each tone has its",
+            "own filter, amp",
+            "envelope, LFO, and",
+            "wave settings."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Performance Mode",
+      "children": [
+        {
+          "title": "Navigation",
+          "lines": [
+            "48 performances",
+            "(3 banks x 16).",
+            "",
+            "Jog: browse",
+            "Step 1-8: select",
+            " part 1-8",
+            "Shift+Step:",
+            " mute/unmute part"
+          ]
+        },
+        {
+          "title": "Knobs (Perf)",
+          "lines": [
+            "Knob 1: Level",
+            " Part volume",
+            "",
+            "Knob 2: Pan",
+            "",
+            "Knob 3: Coarse Tune",
+            " Transpose (semi)",
+            "",
+            "Knob 4: Fine Tune",
+            " Detune (cents)",
+            "",
+            "Knob 5: Key Low",
+            "Knob 6: Key High",
+            " Key range limits",
+            "",
+            "Knob 7: Vel Sense",
+            "Knob 8: Vel Max"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "MIDI",
+      "lines": [
+        "28-voice polyphony.",
+        "",
+        "Patch Mode:",
+        " All 16 channels",
+        "",
+        "Performance Mode:",
+        " Parts on ch 1-8",
+        "",
+        "Octave Transpose:",
+        " -4 to +4 via menu",
+        "",
+        "Supports velocity,",
+        "pitch bend, and CCs."
+      ]
+    }
+  ]
+}

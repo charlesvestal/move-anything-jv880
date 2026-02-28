@@ -79,6 +79,7 @@ ${CROSS_PREFIX}g++ -Ofast -shared -fPIC -std=c++11 \
 # Copy files to dist (use cat to avoid ExtFS deallocation issues with Docker)
 echo "Packaging..."
 cat src/module.json > dist/minijv/module.json
+[ -f src/help.json ] && cat src/help.json > dist/minijv/help.json
 cat src/ui.js > dist/minijv/ui.js
 cat src/ui_menu.mjs > dist/minijv/ui_menu.mjs
 cat src/ui_browser.mjs > dist/minijv/ui_browser.mjs
