@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <time.h>
 #include <dirent.h>
 #include <errno.h>
@@ -934,6 +935,11 @@ static void v2_select_patch(jv880_instance_t *inst, int global_index) {
     jv_debug("[v2_select_patch] Complete\n");
 }
 
+static void chown_to_ableton(const char *path) {
+    struct passwd *pw = getpwnam("ableton");
+    if (pw) chown(path, pw->pw_uid, pw->pw_gid);
+}
+
 /* v2: Save cache */
 static void v2_save_cache(jv880_instance_t *inst) {
     char cache_path[1024];
@@ -984,6 +990,7 @@ static void v2_save_cache(jv880_instance_t *inst) {
     fwrite(inst->bank_names, sizeof(inst->bank_names[0]), inst->bank_count, f);
 
     fclose(f);
+    chown_to_ableton(cache_path);
     fprintf(stderr, "JV880 v2: Saved cache\n");
 }
 
@@ -2303,6 +2310,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (f) {
             fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
             fclose(f);
+            chown_to_ableton(path);
             fprintf(stderr, "JV880 v2: Saved NVRAM to %s\n", path);
         } else {
             fprintf(stderr, "JV880 v2: Failed to save NVRAM to %s\n", path);
@@ -2325,6 +2333,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (f) {
                 fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
                 fclose(f);
+                chown_to_ableton(path);
             }
         }
     } else if (strncmp(key, "load_from_slot_", 15) == 0 && inst->mcu) {
@@ -2362,6 +2371,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (f) {
                 fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
                 fclose(f);
+                chown_to_ableton(path);
             }
         }
     } else if (strcmp(key, "do_save_to_slot") == 0 && inst->mcu) {
@@ -2382,6 +2392,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (f) {
                 fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
                 fclose(f);
+                chown_to_ableton(path);
             }
         }
     } else if (strcmp(key, "do_load_from_slot") == 0 && inst->mcu) {
@@ -2419,6 +2430,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (f) {
                 fwrite(inst->mcu->nvram, 1, NVRAM_SIZE, f);
                 fclose(f);
+                chown_to_ableton(path);
             }
         }
     } else if (strcmp(key, "load_slot") == 0 && inst->mcu) {
