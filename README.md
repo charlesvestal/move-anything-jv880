@@ -1,6 +1,6 @@
 # Move Everything - Mini-JV Module
 
-ROM-based PCM synthesizer emulator module for [Move Everything](https://github.com/charlesvestal/move-anything).
+ROM-based PCM synthesizer emulator module for [Move Everything](https://github.com/charlesvestal/move-everything).
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
@@ -35,7 +35,7 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 
 ## Prerequisites
 
-- [Move Everything](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
+- [Move Everything](https://github.com/charlesvestal/move-everything) installed on your Ableton Move
 - SSH access enabled: http://move.local/development/ssh
 
 ## Requirements
@@ -73,7 +73,7 @@ Supported expansion cards:
 
 1. Download and install the module:
 ```bash
-curl -L https://raw.githubusercontent.com/charlesvestal/move-anything-jv880/main/minijv-module.tar.gz | \
+curl -L https://raw.githubusercontent.com/charlesvestal/move-everything-jv880/main/minijv-module.tar.gz | \
   ssh ableton@move.local 'mkdir -p /data/UserData/move-anything/modules/sound_generators && tar -xz -C /data/UserData/move-anything/modules/sound_generators/'
 ```
 
@@ -88,7 +88,7 @@ scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin jv880_nv
 Requires Docker (recommended) or ARM64 cross-compiler.
 
 ```bash
-git clone https://github.com/charlesvestal/move-anything-jv880
+git clone https://github.com/charlesvestal/move-everything-jv880
 cd move-anything-jv880
 ./scripts/build.sh
 ```
