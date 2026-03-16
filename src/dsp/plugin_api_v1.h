@@ -1,5 +1,32 @@
 /*
- * Move Anything Plugin API v1
+ * Move Anything Plugin API v1 & v2
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Copyright (c) 2025-2026 Charles Vestal
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this file and associated documentation, to deal in the Software without
+ * restriction, including without limitation the rights to use, copy, modify,
+ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
+ * and to permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ *
+ * ---
+ *
+ * This file is dual-licensed. Within the Move Everything host repository it is
+ * also covered by the repository-wide CC BY-NC-SA 4.0 license. External module
+ * authors may use, copy, and distribute this file under the MIT license above
+ * without any CC BY-NC-SA 4.0 obligations.
+ *
+ * ---
  *
  * Stable ABI for DSP modules loaded by the host runtime.
  * Modules are .so files loaded via dlopen() and must export move_plugin_init_v1().
@@ -22,6 +49,28 @@
 /* MIDI source identifiers */
 #define MOVE_MIDI_SOURCE_INTERNAL 0
 #define MOVE_MIDI_SOURCE_EXTERNAL 2
+#define MOVE_MIDI_SOURCE_HOST 3  /* Host-generated (clock, etc) */
+#define MOVE_MIDI_SOURCE_FX_BROADCAST 4  /* Broadcast to audio FX only (skip synth) */
+
+/* Clock status identifiers for host_api_v1.get_clock_status() */
+#define MOVE_CLOCK_STATUS_UNAVAILABLE 0  /* Clock output not available/configured */
+#define MOVE_CLOCK_STATUS_STOPPED 1      /* Clock available, transport stopped */
+#define MOVE_CLOCK_STATUS_RUNNING 2      /* Clock available, transport running */
+
+/* Optional modulation callbacks for chain-owned runtime modulation buses.
+ * Sub-plugins can publish temporary modulation contributions without writing
+ * target base values directly.
+ */
+typedef int (*move_mod_emit_value_fn)(void *ctx,
+                                      const char *source_id,
+                                      const char *target,
+                                      const char *param,
+                                      float signal,
+                                      float depth,
+                                      float offset,
+                                      int bipolar,
+                                      int enabled);
+typedef void (*move_mod_clear_source_fn)(void *ctx, const char *source_id);
 
 /*
  * Host API - provided by host to plugin during initialization
@@ -48,6 +97,21 @@ typedef struct host_api_v1 {
      */
     int (*midi_send_internal)(const uint8_t *msg, int len);
     int (*midi_send_external)(const uint8_t *msg, int len);
+
+    /* Clock status query for sync-aware plugins.
+     * Returns one of MOVE_CLOCK_STATUS_*.
+     */
+    int (*get_clock_status)(void);
+
+    /* Optional runtime modulation callbacks (NULL if unsupported). */
+    move_mod_emit_value_fn mod_emit_value;
+    move_mod_clear_source_fn mod_clear_source;
+    void *mod_host_ctx;
+
+    /* Tempo query — returns current BPM (120.0 default).
+     * Uses sampler_get_bpm() fallback chain: MIDI clock → set tempo → settings → 120.
+     * NULL if host does not support tempo. */
+    float (*get_bpm)(void);
 
 } host_api_v1_t;
 
@@ -91,6 +155,13 @@ typedef struct plugin_api_v1 {
      * Returns: length written, or -1 if not found
      */
     int (*get_param)(const char *key, char *buf, int buf_len);
+
+    /* Get error message if module is in error state
+     * buf: output buffer
+     * buf_len: size of output buffer
+     * Returns: length written, or 0 if no error
+     */
+    int (*get_error)(char *buf, int buf_len);
 
     /* Audio rendering */
 
