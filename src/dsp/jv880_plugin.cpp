@@ -3396,9 +3396,9 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             /* Patch common params */
             "{\"key\":\"nvram_patchCommon_patchlevel\",\"name\":\"Patch Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_patchpan\",\"name\":\"Patch Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Rev\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Reverb Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_reverbtime\",\"name\":\"Reverb Time\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"nvram_patchCommon_choruslevel\",\"name\":\"Cho\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_choruslevel\",\"name\":\"Chorus Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusdepth\",\"name\":\"Chorus Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusrate\",\"name\":\"Chorus Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_analogfeel\",\"name\":\"Analog Feel\",\"type\":\"int\",\"min\":0,\"max\":127},"
