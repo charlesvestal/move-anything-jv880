@@ -488,6 +488,14 @@ typedef struct {
     int underrun_count;
     int render_count;
     int min_buffer_level;
+
+    /* Macro offsets (relative, applied across all 4 tones) */
+    int macro_cutoff;        /* offset for cutofffrequency */
+    int macro_resonance;     /* offset for resonance */
+    int macro_attack;        /* offset for tvaenvtime1 */
+    int macro_decay;         /* offset for tvaenvtime2 */
+    int macro_release;       /* offset for tvaenvtime4 */
+    int macro_tvf_env_depth; /* offset for tvfenvdepth */
 } jv880_instance_t;
 
 /* Forward declarations for v2 helper functions */
@@ -931,6 +939,14 @@ static void v2_select_patch(jv880_instance_t *inst, int global_index) {
         jv_debug("[v2_select_patch] ERROR: MIDI queue full!\n");
     }
     pthread_mutex_unlock(&inst->ring_mutex);
+
+    /* Reset macro offsets on patch change */
+    inst->macro_cutoff = 0;
+    inst->macro_resonance = 0;
+    inst->macro_attack = 0;
+    inst->macro_decay = 0;
+    inst->macro_release = 0;
+    inst->macro_tvf_env_depth = 0;
 
     jv_debug("[v2_select_patch] Complete\n");
 }
@@ -1534,6 +1550,38 @@ static void v2_queue_patch_common_sysex(jv880_instance_t *inst, int paramIdx, in
     inst->midi_write = next;
 }
 
+/* v2: Apply a macro offset across all 4 tones via SysEx
+ * Reads base value from NVRAM, applies offset, sends SysEx for each tone.
+ * Does NOT modify NVRAM — preserves per-tone base values.
+ */
+static void v2_apply_macro(jv880_instance_t *inst, const char *tone_param_name, int offset) {
+    const ToneParamEntry *p = find_tone_param(tone_param_name);
+    if (!p || !inst->mcu) return;
+
+    for (int t = 0; t < 4; t++) {
+        int toneBase = NVRAM_PATCH_OFFSET + 26 + (t * 84);
+        uint8_t raw = inst->mcu->nvram[toneBase + p->nvram_offset];
+        int sysex_val;
+
+        if (p->signed_param == 1) {
+            /* Signed param: stored as int8_t, SysEx uses +64 offset */
+            int base = (int)(int8_t)raw;
+            int result = base + offset;
+            if (result < -63) result = -63;
+            if (result > 63) result = 63;
+            sysex_val = result + 64;
+        } else {
+            /* Unsigned param: 0-127 */
+            int base = (int)raw;
+            int result = base + offset;
+            if (result < 0) result = 0;
+            if (result > 127) result = 127;
+            sysex_val = result;
+        }
+        v2_queue_tone_sysex(inst, t, p->sysex_idx, sysex_val, p->two_byte);
+    }
+}
+
 /* v2: Helper to queue SysEx for part parameter changes
  * two_byte: if true, sends MSB/LSB format (for 0-255 range params like patchnumber)
  *           MSB = (value >> 7) & 0x7F, LSB = value & 0x7F
@@ -2122,6 +2170,30 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 }
             }
         }
+    } else if (strncmp(key, "macro_", 6) == 0 && inst->mcu) {
+        /* Macro controls: virtual params that offset all 4 tones simultaneously */
+        const char *macroName = key + 6;
+        int offset = clamp_int(atoi(val), -64, 63);
+
+        if (strcmp(macroName, "cutoff") == 0) {
+            inst->macro_cutoff = offset;
+            v2_apply_macro(inst, "cutofffrequency", offset);
+        } else if (strcmp(macroName, "resonance") == 0) {
+            inst->macro_resonance = offset;
+            v2_apply_macro(inst, "resonance", offset);
+        } else if (strcmp(macroName, "attack") == 0) {
+            inst->macro_attack = offset;
+            v2_apply_macro(inst, "tvaenvtime1", offset);
+        } else if (strcmp(macroName, "decay") == 0) {
+            inst->macro_decay = offset;
+            v2_apply_macro(inst, "tvaenvtime2", offset);
+        } else if (strcmp(macroName, "release") == 0) {
+            inst->macro_release = offset;
+            v2_apply_macro(inst, "tvaenvtime4", offset);
+        } else if (strcmp(macroName, "tvf_env_depth") == 0) {
+            inst->macro_tvf_env_depth = offset;
+            v2_apply_macro(inst, "tvfenvdepth", offset);
+        }
     } else if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
         int partIdx = key[10] - '0';
         if (partIdx >= 0 && partIdx < 8 && key[11] == '_') {
@@ -2633,6 +2705,76 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         }
     }
 
+    /* Knob overlay params: knob_N_name and knob_N_value for shim overlay display */
+    if (strncmp(key, "knob_", 5) == 0) {
+        int knob_num;
+        char action[32];
+        if (sscanf(key + 5, "%d_%31s", &knob_num, action) == 2 && knob_num >= 1 && knob_num <= 8) {
+            /* Knob-to-param mapping based on current mode */
+            static const char *patch_knob_keys[8] = {
+                "macro_cutoff", "macro_resonance", "macro_attack", "macro_decay",
+                "macro_release", "macro_tvf_env_depth",
+                "nvram_patchCommon_reverblevel", "nvram_patchCommon_choruslevel"
+            };
+            static const char *patch_knob_labels[8] = {
+                "Cutoff", "Resonance", "Attack", "Decay",
+                "Release", "Filter Env", "Reverb", "Chorus"
+            };
+            static const char *perf_knob_keys[8] = {
+                "partlevel", "partpan", "reverbswitch", "chorusswitch",
+                "partcoarsetune", "partfinetune",
+                "internalkeyrangelower", "internalkeyrangeupper"
+            };
+            static const char *perf_knob_labels[8] = {
+                "Level", "Pan", "Reverb", "Chorus",
+                "Coarse Tune", "Fine Tune", "Key Lo", "Key Hi"
+            };
+
+            int idx = knob_num - 1;  /* 0-based */
+            int is_perf = inst->performance_mode;
+            const char **labels = is_perf ? perf_knob_labels : patch_knob_labels;
+            const char **keys = is_perf ? perf_knob_keys : patch_knob_keys;
+
+            if (strcmp(action, "name") == 0) {
+                return snprintf(buf, buf_len, "%s", labels[idx]);
+            }
+            else if (strcmp(action, "value") == 0) {
+                /* Get current value of mapped parameter */
+                const char *pkey = keys[idx];
+                if (strncmp(pkey, "macro_", 6) == 0) {
+                    /* Macro params: return offset value */
+                    const char *mn = pkey + 6;
+                    int val = 0;
+                    if (strcmp(mn, "cutoff") == 0) val = inst->macro_cutoff;
+                    else if (strcmp(mn, "resonance") == 0) val = inst->macro_resonance;
+                    else if (strcmp(mn, "attack") == 0) val = inst->macro_attack;
+                    else if (strcmp(mn, "decay") == 0) val = inst->macro_decay;
+                    else if (strcmp(mn, "release") == 0) val = inst->macro_release;
+                    else if (strcmp(mn, "tvf_env_depth") == 0) val = inst->macro_tvf_env_depth;
+                    return snprintf(buf, buf_len, "%d", val);
+                } else {
+                    /* Forward to normal get_param for nvram/sram params */
+                    return v2_get_param(instance, pkey, buf, buf_len);
+                }
+            }
+        }
+        return -1;
+    }
+
+    /* Macro params: return current offset value */
+    if (strncmp(key, "macro_", 6) == 0) {
+        const char *macroName = key + 6;
+        int val = 0;
+        if (strcmp(macroName, "cutoff") == 0) val = inst->macro_cutoff;
+        else if (strcmp(macroName, "resonance") == 0) val = inst->macro_resonance;
+        else if (strcmp(macroName, "attack") == 0) val = inst->macro_attack;
+        else if (strcmp(macroName, "decay") == 0) val = inst->macro_decay;
+        else if (strcmp(macroName, "release") == 0) val = inst->macro_release;
+        else if (strcmp(macroName, "tvf_env_depth") == 0) val = inst->macro_tvf_env_depth;
+        else return -1;
+        return snprintf(buf, buf_len, "%d", val);
+    }
+
     /* Fast path for sram_part_ params (performance mode editing) */
     if (strncmp(key, "sram_part_", 10) == 0 && inst->mcu) {
         int partIdx = key[10] - '0';
@@ -3125,13 +3267,15 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"count_param\":\"preset_count\","
                     "\"name_param\":\"preset_name\","
                     "\"children\":\"patch_main\","
-                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"knobs\":[\"macro_cutoff\",\"macro_resonance\",\"macro_attack\",\"macro_decay\",\"macro_release\",\"macro_tvf_env_depth\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\"],"
+                    "\"knob_labels\":[\"Cut\",\"Res\",\"Atk\",\"Dcy\",\"Rel\",\"FEv\",\"Rev\",\"Cho\"],"
                     "\"params\":[]"
                 "},"
                 "\"patch_main\":{"
                     "\"label\":\"Patch\","
                     "\"children\":null,"
-                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"knobs\":[\"macro_cutoff\",\"macro_resonance\",\"macro_attack\",\"macro_decay\",\"macro_release\",\"macro_tvf_env_depth\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\"],"
+                    "\"knob_labels\":[\"Cut\",\"Res\",\"Atk\",\"Dcy\",\"Rel\",\"FEv\",\"Rev\",\"Cho\"],"
                     "\"params\":["
                         "{\"level\":\"tone_selector\",\"label\":\"Edit Tones\"},"
                         "{\"level\":\"patch_common\",\"label\":\"Common Settings\"},"
@@ -3141,7 +3285,8 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "\"patch_common\":{"
                     "\"label\":\"Common\","
                     "\"children\":null,"
-                    "\"knobs\":[\"nvram_patchCommon_patchlevel\",\"nvram_patchCommon_patchpan\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\",\"nvram_patchCommon_analogfeel\",\"octave_transpose\"],"
+                    "\"knobs\":[\"macro_cutoff\",\"macro_resonance\",\"macro_attack\",\"macro_decay\",\"macro_release\",\"macro_tvf_env_depth\",\"nvram_patchCommon_reverblevel\",\"nvram_patchCommon_choruslevel\"],"
+                    "\"knob_labels\":[\"Cut\",\"Res\",\"Atk\",\"Dcy\",\"Rel\",\"FEv\",\"Rev\",\"Cho\"],"
                     "\"params\":["
                         "{\"key\":\"nvram_patchCommon_patchlevel\",\"label\":\"Patch Level\"},"
                         "{\"key\":\"nvram_patchCommon_patchpan\",\"label\":\"Patch Pan\"},"
@@ -3161,6 +3306,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_count\":4,"
                     "\"child_label\":\"Tone\","
                     "\"knobs\":[\"level\",\"pan\",\"cutofffrequency\",\"resonance\",\"lfo1pitchdepth\",\"lfo1tvfdepth\",\"tvaenvtime1\",\"tvaenvtime2\"],"
+                    "\"knob_labels\":[\"Lvl\",\"Pan\",\"Cut\",\"Res\",\"LPt\",\"LFl\",\"AT1\",\"AT2\"],"
                     "\"params\":["
                         "\"toneswitch\",\"wavegroup\",\"wavenumber\","
                         "\"level\",\"pan\",\"levelkeyfollow\",\"panningkeyfollow\","
@@ -3210,6 +3356,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"child_count\":8,"
                     "\"child_label\":\"Part\","
                     "\"knobs\":[\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\"],"
+                    "\"knob_labels\":[\"Lvl\",\"Pan\",\"Rev\",\"Cho\",\"CTn\",\"FTn\",\"KLo\",\"KHi\"],"
                     "\"params\":[\"patchbank\",\"patchnumber\",\"partlevel\",\"partpan\",\"reverbswitch\",\"chorusswitch\",\"partcoarsetune\",\"partfinetune\",\"internalkeyrangelower\",\"internalkeyrangeupper\",\"internalkeytranspose\"]"
                 "},"
                 "\"expansions\":{"
@@ -3239,12 +3386,19 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"key\":\"performance\",\"name\":\"Performance\",\"type\":\"int\",\"min\":0,\"max\":47},"
             "{\"key\":\"part\",\"name\":\"Part\",\"type\":\"int\",\"min\":0,\"max\":7},"
             "{\"key\":\"octave_transpose\",\"name\":\"Octave\",\"type\":\"int\",\"min\":-3,\"max\":3},"
+            /* Macro controls (offset all 4 tones simultaneously) */
+            "{\"key\":\"macro_cutoff\",\"name\":\"Cut\",\"type\":\"int\",\"min\":-64,\"max\":63},"
+            "{\"key\":\"macro_resonance\",\"name\":\"Res\",\"type\":\"int\",\"min\":-64,\"max\":63},"
+            "{\"key\":\"macro_attack\",\"name\":\"Atk\",\"type\":\"int\",\"min\":-64,\"max\":63},"
+            "{\"key\":\"macro_decay\",\"name\":\"Dcy\",\"type\":\"int\",\"min\":-64,\"max\":63},"
+            "{\"key\":\"macro_release\",\"name\":\"Rel\",\"type\":\"int\",\"min\":-64,\"max\":63},"
+            "{\"key\":\"macro_tvf_env_depth\",\"name\":\"FEv\",\"type\":\"int\",\"min\":-64,\"max\":63},"
             /* Patch common params */
             "{\"key\":\"nvram_patchCommon_patchlevel\",\"name\":\"Patch Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_patchpan\",\"name\":\"Patch Pan\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Reverb Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_reverblevel\",\"name\":\"Rev\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_reverbtime\",\"name\":\"Reverb Time\",\"type\":\"int\",\"min\":0,\"max\":127},"
-            "{\"key\":\"nvram_patchCommon_choruslevel\",\"name\":\"Chorus Level\",\"type\":\"int\",\"min\":0,\"max\":127},"
+            "{\"key\":\"nvram_patchCommon_choruslevel\",\"name\":\"Cho\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusdepth\",\"name\":\"Chorus Depth\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_chorusrate\",\"name\":\"Chorus Rate\",\"type\":\"int\",\"min\":0,\"max\":127},"
             "{\"key\":\"nvram_patchCommon_analogfeel\",\"name\":\"Analog Feel\",\"type\":\"int\",\"min\":0,\"max\":127},"

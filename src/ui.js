@@ -434,6 +434,17 @@ function drawLoading() {
     display.drawText(4, 28, status, 1);
 }
 
+function drawKnobLabels(y) {
+    if (!currentLevel || !currentLevel.knob_labels) return;
+    const labels = currentLevel.knob_labels;
+    const spacing = SCREEN_WIDTH / 8;
+    for (let i = 0; i < labels.length && i < 8; i++) {
+        const lbl = labels[i];
+        const x = Math.floor(i * spacing + (spacing - lbl.length * 6) / 2);
+        display.drawText(x, y, lbl, 1);
+    }
+}
+
 function drawListBrowser() {
     // Header with mode
     const modeLabel = currentMode === 'performance' ? 'PERF' : 'PATCH';
@@ -454,6 +465,9 @@ function drawListBrowser() {
         const bankX = Math.max(0, (SCREEN_WIDTH - bankName.length * 6) / 2);
         display.drawText(bankX, 12, bankName, 1);
     }
+
+    // Knob labels
+    drawKnobLabels(44);
 
     // Footer hint
     display.drawText(0, 56, 'Jog:Browse  Click:Menu', 1);
