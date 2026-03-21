@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Mini-JV module for Move Anything (ARM64)
+# Build Mini-JV module for Schwung (ARM64)
 #
 # Automatically uses Docker for cross-compilation if needed.
 # Set CROSS_PREFIX to skip Docker (e.g., for native ARM builds).
@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGE_NAME="move-anything-builder"
+IMAGE_NAME="schwung-builder"
 
 # Check if we need Docker
 if [ -z "$CROSS_PREFIX" ] && [ ! -f "/.dockerenv" ]; then

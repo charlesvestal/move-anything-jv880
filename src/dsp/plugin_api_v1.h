@@ -1,5 +1,5 @@
 /*
- * Move Anything Plugin API v1 & v2
+ * Schwung Plugin API v1 & v2
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,7 +21,7 @@
  *
  * ---
  *
- * This file is dual-licensed. Within the Move Everything host repository it is
+ * This file is dual-licensed. Within the Schwung host repository it is
  * also covered by the repository-wide CC BY-NC-SA 4.0 license. External module
  * authors may use, copy, and distribute this file under the MIT license above
  * without any CC BY-NC-SA 4.0 obligations.

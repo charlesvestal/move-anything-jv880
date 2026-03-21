@@ -3,7 +3,7 @@
 # Runs on host, executes tests via SSH to Move device
 #
 # Prerequisites:
-# - Move Anything running with Mini-JV loaded
+# - Schwung running with Mini-JV loaded
 # - SSH access to move.local
 #
 # Tests verify that:
@@ -13,7 +13,7 @@
 set -e
 
 MOVE_HOST="${MOVE_HOST:-ableton@move.local}"
-MODULE_PATH="/data/UserData/move-anything/modules/sound_generators/minijv"
+MODULE_PATH="/data/UserData/schwung/modules/sound_generators/minijv"
 TEST_DIR="/tmp/minijv_test"
 
 # Colors for output
@@ -52,12 +52,12 @@ setup_test_helper() {
     ssh "$MOVE_HOST" "mkdir -p $TEST_DIR"
 
     # Create a simple test that uses the module's parameter system
-    # This relies on the fact that Move Anything exposes params via files or we can
+    # This relies on the fact that Schwung exposes params via files or we can
     # inject test commands
 
     cat << 'EOF' | ssh "$MOVE_HOST" "cat > $TEST_DIR/param_test.js"
 // Parameter test helper for Mini-JV
-// This would need to be integrated with Move Anything's JS runtime
+// This would need to be integrated with Schwung's JS runtime
 
 const tests = [
     // Tone parameters - verify NVRAM offsets
@@ -96,7 +96,7 @@ test_roundtrip() {
     local value="$2"
     local desc="$3"
 
-    # This would need Move Anything's param API exposed
+    # This would need Schwung's param API exposed
     # For now, create a marker file approach
     log_info "Testing $desc ($param = $value)..."
 
@@ -157,13 +157,13 @@ print_expected_layout() {
     echo ""
 }
 
-# Create on-device test that can run within Move Anything
+# Create on-device test that can run within Schwung
 create_device_test() {
     log_info "Creating on-device verification test..."
 
     cat << 'JSEOF' | ssh "$MOVE_HOST" "cat > $TEST_DIR/verify_params.mjs"
 // On-device parameter verification for Mini-JV
-// Run this from Move Anything's JS environment
+// Run this from Schwung's JS environment
 
 export function verifyToneParams() {
     const results = [];
@@ -235,7 +235,7 @@ main() {
     log_info "Checking connection to $MOVE_HOST..."
     if ! ssh -o ConnectTimeout=5 "$MOVE_HOST" "echo ok" > /dev/null 2>&1; then
         echo -e "${RED}Cannot connect to $MOVE_HOST${NC}"
-        echo "Make sure Move is connected and Move Anything is running."
+        echo "Make sure Move is connected and Schwung is running."
         exit 1
     fi
     log_pass "Connected to Move"
@@ -249,7 +249,7 @@ main() {
     echo ""
     echo "=== Manual Verification Steps ==="
     echo ""
-    echo "Since we can't directly inject JS into the running Move Anything,"
+    echo "Since we can't directly inject JS into the running Schwung,"
     echo "use these manual steps to verify:"
     echo ""
     echo "1. Load Mini-JV in Signal Chain"
@@ -265,13 +265,13 @@ main() {
     echo ""
     echo "4. Or, SSH to device and run:"
     echo "   ssh $MOVE_HOST"
-    echo "   # Then from Move Anything console, import the test module"
+    echo "   # Then from Schwung console, import the test module"
     echo ""
 
     # Alternative: use the plugin's dump_nvram feature
     echo "=== Built-in Test Commands ==="
     echo ""
-    echo "The plugin now has built-in test commands. From Move Anything JS console:"
+    echo "The plugin now has built-in test commands. From Schwung JS console:"
     echo ""
     echo "1. Run automated parameter offset test:"
     echo "   host_module_set_param('run_param_test', '1')"
@@ -287,7 +287,7 @@ main() {
     echo ""
     echo "3. To view test output, SSH to device and check logs:"
     echo "   ssh $MOVE_HOST"
-    echo "   journalctl -f -u move-anything"
+    echo "   journalctl -f -u schwung"
     echo ""
     echo "=== Expected Test Output ==="
     echo ""

@@ -6,7 +6,7 @@ set -e
 
 MOVE_HOST="${MOVE_HOST:-ableton@move.local}"
 TRIGGER_FILE="/tmp/minijv_run_test"
-LOG_FILE="/data/UserData/move-anything/shadow_inprocess.log"
+LOG_FILE="/data/UserData/schwung/shadow_inprocess.log"
 
 echo "=== Mini-JV On-Device Parameter Test ==="
 echo ""
@@ -40,7 +40,7 @@ echo ""
 ssh "$MOVE_HOST" "cat > /tmp/verify_nvram.sh" << 'EOF'
 #!/bin/bash
 # This would need the NVRAM file to verify
-NVRAM="/data/UserData/move-anything/modules/sound_generators/minijv/roms/jv880_nvram.bin"
+NVRAM="/data/UserData/schwung/modules/sound_generators/minijv/roms/jv880_nvram.bin"
 
 if [ ! -f "$NVRAM" ]; then
     echo "NVRAM file not found at $NVRAM"

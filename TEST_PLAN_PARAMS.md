@@ -8,7 +8,7 @@ This test plan verifies the NVRAM offset corrections for Patch mode (tone) and P
    ```bash
    ./scripts/build.sh && ./scripts/install.sh
    ```
-2. Restart Move Anything on the device
+2. Restart Schwung on the device
 3. Load Mini-JV in Signal Chain or standalone
 
 ---

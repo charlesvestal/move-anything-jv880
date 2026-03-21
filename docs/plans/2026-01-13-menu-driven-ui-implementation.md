@@ -2,9 +2,9 @@
 
 Based on design: `2026-01-13-menu-driven-ui-design.md`
 
-## Phase 1: Shared Components (move-anything repo)
+## Phase 1: Shared Components (schwung repo)
 
-Work in `move-anything/src/shared/`.
+Work in `schwung/src/shared/`.
 
 ### 1.1 Create MenuStack (`menu_stack.mjs`)
 
@@ -244,7 +244,7 @@ export function drawHierarchicalMenu({ title, items, state }) {
 
 ---
 
-## Phase 2: Settings Migration (move-anything repo)
+## Phase 2: Settings Migration (schwung repo)
 
 ### 2.1 Refactor menu_settings.mjs
 

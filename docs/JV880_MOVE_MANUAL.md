@@ -4,7 +4,7 @@ This module turns Move into a Mini-JV synthesizer with menu-driven editing.
 
 ## Quick Start
 
-1. Launch Move Anything
+1. Launch Schwung
 2. Select the **Mini-JV** module
 3. Play pads to trigger sounds
 4. Turn encoders to shape the sound (Cutoff, Resonance, Attack, etc.)

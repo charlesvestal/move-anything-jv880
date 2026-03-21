@@ -1,5 +1,5 @@
 /*
- * Mini-JV Plugin for Move Anything
+ * Mini-JV Plugin for Schwung
  * Based on mini-jv880 emulator by giulioz (based on Nuked-SC55 by nukeykt)
  * Multi-expansion support with unified patch list
  */

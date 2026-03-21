@@ -9,7 +9,7 @@ Replace the current step-button-driven UI with a hierarchical menu system that m
 - Reduce button presses needed to access part/tone editing
 - Clear visual feedback for what's selected and muted
 - Consistent navigation via jog wheel and menu button
-- Use shared menu components from move-anything repo
+- Use shared menu components from schwung repo
 
 ## Modes
 
@@ -249,9 +249,9 @@ Steps 1-8: [BRIGHT] [dim] [grey] [dim] [off] [off] [off] [off]
 - **MENU**: Bright when in edit menu
 - **MUTE**: Red when selected tone/part is muted
 
-## Shared Menu Components (move-anything repo)
+## Shared Menu Components (schwung repo)
 
-Before implementing the Mini-JV UI, we'll build shared menu components in move-anything that can be reused across modules.
+Before implementing the Mini-JV UI, we'll build shared menu components in schwung that can be reused across modules.
 
 ### MenuStack (`src/shared/menu_stack.mjs`)
 
@@ -338,14 +338,14 @@ Shows breadcrumb or title from stack, renders items with appropriate value displ
 
 ## Implementation Order
 
-### Phase 1: Shared Components (move-anything repo)
+### Phase 1: Shared Components (schwung repo)
 
 1. Create `menu_stack.mjs` - navigation history management
 2. Create `menu_items.mjs` - item type definitions and helpers
 3. Create `menu_nav.mjs` - input handling with edit mode
 4. Extend `menu_layout.mjs` or create `menu_render.mjs` - hierarchical rendering
 
-### Phase 2: Settings Migration (move-anything repo)
+### Phase 2: Settings Migration (schwung repo)
 
 1. Refactor `menu_settings.mjs` to use new shared components
 2. Convert settings items to MenuItem types

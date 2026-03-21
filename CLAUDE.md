@@ -4,7 +4,7 @@ Instructions for Claude Code when working with this repository.
 
 ## Project Overview
 
-Mini-JV module for Move Anything - a ROM-based synthesizer emulator based on mini-jv880.
+Mini-JV module for Schwung - a ROM-based synthesizer emulator based on mini-jv880.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ src/
 
 ### Plugin API
 
-Implements Move Anything plugin_api_v1/v2:
+Implements Schwung plugin_api_v1/v2:
 - `on_load`/`create_instance`: Loads ROMs, initializes emulator, builds patch list
 - `on_midi`: Queues MIDI for emulator thread
 - `set_param`: preset, octave_transpose, program_change, next_bank, prev_bank, mode, performance, part, jump_to_expansion, load_user_patch, write_patch_N, write_performance_N, save_nvram

@@ -1,14 +1,14 @@
-# Move Everything - Mini-JV Module
+# Schwung - Mini-JV Module
 
-ROM-based PCM synthesizer emulator module for [Move Everything](https://github.com/charlesvestal/move-everything).
+ROM-based PCM synthesizer emulator module for [Schwung](https://github.com/charlesvestal/schwung).
 
 Based on [mini-jv880](https://github.com/giulioz/mini-jv880) by giulioz (which is based on [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt).
 
 ## Quick Start
 
-**Already have ROMs and Move Everything installed?**
+**Already have ROMs and Schwung installed?**
 
-1. Launch Move Everything → **Module Store** → **Sound Generators** → **Mini-JV** → **Install**
+1. Launch Schwung → **Module Store** → **Sound Generators** → **Mini-JV** → **Install**
 2. Copy your ROM files to Move (see Requirements below)
 3. Select **Mini-JV** from the main menu
 4. **Play pads** - you're making Mini-JV sounds!
@@ -35,7 +35,7 @@ See the [full manual](docs/JV880_MOVE_MANUAL.md) for complete control documentat
 
 ## Prerequisites
 
-- [Move Everything](https://github.com/charlesvestal/move-everything) installed on your Ableton Move
+- [Schwung](https://github.com/charlesvestal/schwung) installed on your Ableton Move
 - SSH access enabled: http://move.local/development/ssh
 
 ## Requirements
@@ -73,14 +73,14 @@ Supported expansion cards:
 
 1. Download and install the module:
 ```bash
-curl -L https://raw.githubusercontent.com/charlesvestal/move-everything-jv880/main/minijv-module.tar.gz | \
-  ssh ableton@move.local 'mkdir -p /data/UserData/move-anything/modules/sound_generators && tar -xz -C /data/UserData/move-anything/modules/sound_generators/'
+curl -L https://raw.githubusercontent.com/charlesvestal/schwung-jv880/main/minijv-module.tar.gz | \
+  ssh ableton@move.local 'mkdir -p /data/UserData/schwung/modules/sound_generators && tar -xz -C /data/UserData/schwung/modules/sound_generators/'
 ```
 
 2. Copy your ROM files to the device:
 ```bash
 scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin jv880_nvram.bin \
-  ableton@move.local:/data/UserData/move-anything/modules/sound_generators/minijv/roms/
+  ableton@move.local:/data/UserData/schwung/modules/sound_generators/minijv/roms/
 ```
 
 ### Build from Source
@@ -88,8 +88,8 @@ scp jv880_rom1.bin jv880_rom2.bin jv880_waverom1.bin jv880_waverom2.bin jv880_nv
 Requires Docker (recommended) or ARM64 cross-compiler.
 
 ```bash
-git clone https://github.com/charlesvestal/move-everything-jv880
-cd move-anything-jv880
+git clone https://github.com/charlesvestal/schwung-jv880
+cd schwung-jv880
 ./scripts/build.sh
 ```
 
@@ -127,7 +127,7 @@ See LICENSE file for details.
 
 ## AI Assistance Disclaimer
 
-This module is part of Move Everything and was developed with AI assistance, including Claude, Codex, and other AI assistants.
+This module is part of Schwung and was developed with AI assistance, including Claude, Codex, and other AI assistants.
 
 All architecture, implementation, and release decisions are reviewed by human maintainers.  
 AI-assisted content may still contain errors, so please validate functionality, security, and license compatibility before production use.
