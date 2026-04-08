@@ -20,10 +20,55 @@
       ".rom"
     ],
     "allowFolders": true,
-    "description": "Requires JV-880 ROM files. Upload the rom1.bin and rom2.bin files, or a folder containing them.",
-    "hint": "Upload JV-880 ROM files. The plugin requires the v1.0.0 waveform ROMs including jv880_nvram.bin. Upload expansion bins to the expansions folder.",
+    "description": "Requires JV-880 v1.0.0 ROM files",
+    "hint": "The plugin requires the v1.0.0 ROMs. Version 1.0.1 will NOT work.",
     "hint_url": "https://github.com/charlesvestal/schwung-jv880",
-    "hint_url_label": "Read more"
+    "hint_url_label": "Read more",
+    "files": [
+      {
+        "filename": "jv880_rom1.bin",
+        "label": "CPU ROM",
+        "size": 32768,
+        "crc32": "B3D611B1",
+        "required": true
+      },
+      {
+        "filename": "jv880_rom2.bin",
+        "label": "Patch ROM",
+        "size": 262144,
+        "crc32": "B266EFE9",
+        "required": true
+      },
+      {
+        "filename": "jv880_waverom1.bin",
+        "label": "Waveform ROM 1",
+        "size": 2097152,
+        "crc32": "1348C0DC",
+        "required": true
+      },
+      {
+        "filename": "jv880_waverom2.bin",
+        "label": "Waveform ROM 2",
+        "size": 2097152,
+        "crc32": "D55FCF90",
+        "required": true
+      },
+      {
+        "filename": "jv880_nvram.bin",
+        "label": "NVRAM (user patches)",
+        "size": 32768,
+        "required": true
+      }
+    ],
+    "folders": [
+      {
+        "path": "expansions",
+        "label": "Expansion ROMs",
+        "description": "SR-JV80 expansion cards (8MB or 2MB .bin files)",
+        "extensions": [".bin", ".BIN"],
+        "required": false
+      }
+    ]
   },
   "capabilities": {
     "audio_out": true,
