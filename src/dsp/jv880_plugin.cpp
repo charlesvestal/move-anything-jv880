@@ -108,8 +108,18 @@ typedef struct {
     uint8_t *unscrambled;   /* Unscrambled ROM data (loaded on demand) */
 } ExpansionInfo;
 
-/* Unified patch list */
-#define MAX_TOTAL_PATCHES 4096
+/* Unified patch list.
+ *
+ * Size is determined at runtime from scanned content rather than capped at
+ * a compile-time maximum. Total = 3 internal banks (Preset A/B + Internal,
+ * 64 patches each = 192 fixed by the JV-880 ROM layout) plus the sum of
+ * each expansion's declared patch_count (each card contributes
+ * MAX_PATCHES_PER_EXP at most, MAX_EXPANSIONS cards at most).
+ *
+ * inst->patches is heap-allocated in v2_build_patch_list (after scanning
+ * expansion headers so the exact total is known) or v2_load_cache (using
+ * the total_patches stored in the cache header), and freed in
+ * v2_destroy_instance. */
 typedef struct {
     char name[PATCH_NAME_LEN + 1];
     int expansion_index;    /* -1 for internal, 0+ for expansion */
@@ -396,8 +406,8 @@ typedef struct {
     uint32_t expansion_sizes[MAX_EXP_FILES];
     int expansion_file_count;
 
-    /* Patches */
-    PatchInfo patches[MAX_TOTAL_PATCHES];
+    /* Patches (heap-allocated, sized to actual content - see PatchInfo comment) */
+    PatchInfo *patches;
     int total_patches;
     int current_patch;
 
@@ -679,6 +689,32 @@ static void v2_scan_expansions(jv880_instance_t *inst) {
 
 /* v2: Build complete patch list with expansions */
 static void v2_build_patch_list(jv880_instance_t *inst) {
+    /* Compute exact total: 3 fixed internal banks of 64 patches (Preset A/B
+     * + Internal, hard-coded by JV-880 ROM layout) plus each expansion's
+     * declared patch_count, capped per-expansion at MAX_PATCHES_PER_EXP and
+     * by available bank slots. */
+    const int internal_total = 3 * 64;
+    int expansion_total = 0;
+    int expansion_banks_usable = 0;
+    int banks_used_by_internal = 3;
+    int banks_remaining = (MAX_BANKS > banks_used_by_internal)
+                          ? (MAX_BANKS - banks_used_by_internal) : 0;
+    for (int e = 0; e < inst->expansion_count && expansion_banks_usable < banks_remaining; e++) {
+        expansion_total += inst->expansions[e].patch_count;
+        expansion_banks_usable++;
+    }
+
+    int new_total = internal_total + expansion_total;
+
+    free(inst->patches);
+    inst->patches = (PatchInfo *)calloc(new_total > 0 ? new_total : 1, sizeof(PatchInfo));
+    if (!inst->patches) {
+        fprintf(stderr, "JV880 v2: Failed to allocate patches array (%d entries)\n", new_total);
+        inst->total_patches = 0;
+        inst->bank_count = 0;
+        return;
+    }
+
     inst->total_patches = 0;
     inst->bank_count = 0;
 
@@ -687,7 +723,7 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
     strncpy(inst->bank_names[inst->bank_count], "Preset A", sizeof(inst->bank_names[0]) - 1);
     inst->bank_count++;
 
-    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+    for (int i = 0; i < 64; i++) {
         PatchInfo *p = &inst->patches[inst->total_patches];
         uint32_t offset = PATCH_OFFSET_PRESET_A + (i * PATCH_SIZE);
         memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
@@ -703,7 +739,7 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
     strncpy(inst->bank_names[inst->bank_count], "Preset B", sizeof(inst->bank_names[0]) - 1);
     inst->bank_count++;
 
-    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+    for (int i = 0; i < 64; i++) {
         PatchInfo *p = &inst->patches[inst->total_patches];
         uint32_t offset = PATCH_OFFSET_PRESET_B + (i * PATCH_SIZE);
         memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
@@ -719,7 +755,7 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
     strncpy(inst->bank_names[inst->bank_count], "Internal", sizeof(inst->bank_names[0]) - 1);
     inst->bank_count++;
 
-    for (int i = 0; i < 64 && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+    for (int i = 0; i < 64; i++) {
         PatchInfo *p = &inst->patches[inst->total_patches];
         uint32_t offset = PATCH_OFFSET_INTERNAL + (i * PATCH_SIZE);
         memcpy(p->name, &inst->rom2[offset], PATCH_NAME_LEN);
@@ -730,8 +766,10 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
         inst->total_patches++;
     }
 
-    /* Expansion patches */
-    for (int e = 0; e < inst->expansion_count && inst->bank_count < MAX_BANKS; e++) {
+    /* Expansion patches. Bounded by expansion_banks_usable so total_patches
+     * stays consistent with the up-front allocation when MAX_BANKS would
+     * otherwise force us to drop trailing expansions. */
+    for (int e = 0; e < expansion_banks_usable; e++) {
         ExpansionInfo *exp = &inst->expansions[e];
         exp->first_global_index = inst->total_patches;
 
@@ -739,7 +777,7 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
         strncpy(inst->bank_names[inst->bank_count], exp->name, sizeof(inst->bank_names[0]) - 1);
         inst->bank_count++;
 
-        for (int i = 0; i < exp->patch_count && inst->total_patches < MAX_TOTAL_PATCHES; i++) {
+        for (int i = 0; i < exp->patch_count; i++) {
             PatchInfo *p = &inst->patches[inst->total_patches];
             uint32_t offset = exp->patches_offset + (i * PATCH_SIZE);
 
@@ -757,8 +795,9 @@ static void v2_build_patch_list(jv880_instance_t *inst) {
         }
     }
 
-    fprintf(stderr, "JV880 v2: Total patches: %d (192 internal + %d expansion) in %d banks\n",
-            inst->total_patches, inst->total_patches - 192, inst->bank_count);
+    fprintf(stderr, "JV880 v2: Total patches: %d (%d internal + %d expansion) in %d banks\n",
+            inst->total_patches, internal_total, inst->total_patches - internal_total,
+            inst->bank_count);
 }
 
 /* v2: Load expansion data on demand */
@@ -1074,6 +1113,18 @@ static int v2_load_cache(jv880_instance_t *inst) {
         inst->expansions[i].unscrambled = nullptr;
     }
 
+    free(inst->patches);
+    inst->patches = (PatchInfo *)calloc(inst->total_patches > 0 ? inst->total_patches : 1,
+                                        sizeof(PatchInfo));
+    if (!inst->patches) {
+        fprintf(stderr, "JV880 v2: Failed to allocate patches array from cache (%d entries)\n",
+                inst->total_patches);
+        inst->total_patches = 0;
+        inst->bank_count = 0;
+        fclose(f);
+        return 0;
+    }
+
     fread(inst->patches, sizeof(PatchInfo), inst->total_patches, f);
     fread(inst->bank_starts, sizeof(inst->bank_starts[0]), inst->bank_count, f);
     fread(inst->bank_names, sizeof(inst->bank_names[0]), inst->bank_count, f);
@@ -1333,6 +1384,12 @@ static void v2_destroy_instance(void *instance) {
     if (inst->rom2) {
         free(inst->rom2);
         inst->rom2 = nullptr;
+    }
+
+    /* Free patch list (heap-allocated in v2_build_patch_list / v2_load_cache) */
+    if (inst->patches) {
+        free(inst->patches);
+        inst->patches = nullptr;
     }
 
     /* Free expansion data */

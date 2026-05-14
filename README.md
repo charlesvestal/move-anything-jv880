@@ -103,6 +103,12 @@ cd schwung-jv880
 
 See `docs/JV880_MOVE_MANUAL.md` for the full control map and editor workflow.
 
+## MIDI Channel
+
+In **Patch mode** the JV-880 listens on a single MIDI channel (the "basic channel"), so the channel that Schwung forwards pads/external MIDI on must match it or you'll hear silence even though notes reach the plugin. Set the Schwung receive/forward channel to **1** for the default JV-880 basic channel, or change the JV-880's basic channel via its System menu and match Schwung to that.
+
+In **Performance mode** each part can listen on its own channel, so multi-channel input works as expected without any host-side configuration.
+
 ## Signal Chain Integration
 
 Mini-JV works both as a standalone module and as a sound generator in Signal Chain patches. The install script adds chain presets for using Mini-JV with arpeggiators and effects.
